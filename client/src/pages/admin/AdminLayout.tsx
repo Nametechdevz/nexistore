@@ -25,8 +25,12 @@ export function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [drawer, setDrawer] = useState(false);
-  useEffect(() => setDrawer(false), [location.pathname]);
-  useEffect(() => window.scrollTo(0, 0), [location.pathname]);
+  useEffect(() => {
+    setDrawer(false);
+  }, [location.pathname]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   if (!ready) return <div style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}><Spinner /></div>;
   if (!user) return <Navigate to={`/ingresar?next=${encodeURIComponent(location.pathname)}`} replace />;

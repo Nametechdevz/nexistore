@@ -6,7 +6,7 @@ import "./styles/hero.css";
 
 import { lazy, StrictMode, Suspense, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, Outlet, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, Outlet, RouterProvider, useRouteError } from "react-router-dom";
 import { ShopLayout } from "./components/Layout";
 import { AppProviders } from "./lib/state";
 import { ForgotPage, LoginPage, RegisterPage, ResetPage } from "./pages/Auth";
@@ -43,8 +43,29 @@ const Admin = (name: string) => {
   );
 };
 
+/** Pantalla de error propia (en lugar de la de desarrollo de React Router). */
+function AppError() {
+  const err = useRouteError() as { message?: string } | undefined;
+  // Tras una actualización, los archivos antiguos del panel ya no existen: basta con recargar.
+  const stale = /dynamically imported module|Importing a module script failed|Loading chunk/i.test(err?.message ?? "");
+  return (
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "var(--bg)", color: "var(--text)" }}>
+      <div style={{ maxWidth: 440, textAlign: "center", display: "grid", gap: 14 }}>
+        <h1 style={{ fontSize: 24 }}>{stale ? "Hay una versión nueva de la tienda" : "Algo salió mal"}</h1>
+        <p className="muted">{stale ? "Recarga la página para continuar." : "Ocurrió un error inesperado al mostrar esta página. Recarga para intentarlo de nuevo."}</p>
+        {!stale && err?.message && <code style={{ fontSize: 12, opacity: 0.6, wordBreak: "break-word" }}>{err.message}</code>}
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Recargar</button>
+          <a className="btn btn-outline" href="/">Ir al inicio</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const router = createBrowserRouter([
   {
+    errorElement: <AppError />,
     element: (
       <AppProviders>
         <Outlet />

@@ -210,7 +210,9 @@ export function ResetPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const form = useForm(resetSchema, { token, password: "", confirmPassword: "" });
-  useEffect(() => form.set("token", token), [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    form.set("token", token);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   const onSubmit = form.submit(async (data) => {
     await api.post("/api/auth/reset", data);
     toast("success", "Contraseña actualizada. Ya puedes iniciar sesión.");

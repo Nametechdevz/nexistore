@@ -179,7 +179,9 @@ export function Header() {
   const cart = useCart();
   const [drawer, setDrawer] = useState(false);
   const location = useLocation();
-  useEffect(() => setDrawer(false), [location.pathname]);
+  useEffect(() => {
+    setDrawer(false);
+  }, [location.pathname]);
 
   return (
     <header className="site-header">

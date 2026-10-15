@@ -261,7 +261,9 @@ export function Chat({ ticket, me, onSend, disabled }: { ticket: TicketDetail; m
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [ticket.messages.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [ticket.messages.length]);
   return (
     <>
       <div className="chat" aria-live="polite">
