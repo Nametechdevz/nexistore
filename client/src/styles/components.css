@@ -497,7 +497,8 @@
   width: 17px;
   height: 17px;
 }
-.only-mobile {
+.only-mobile,
+.mobile-search {
   display: none;
 }
 
@@ -1434,7 +1435,7 @@
 .auth {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
-  min-height: calc(100vh - 68px);
+  min-height: 100vh;
 }
 .auth-form {
   display: grid;
@@ -1543,7 +1544,7 @@
 .dash-profile strong {
   font-size: var(--fs-md);
 }
-.dash-profile span {
+.dash-profile > span:not(.avatar) {
   font-size: var(--fs-xs);
   color: var(--text-3);
   word-break: break-all;
@@ -2051,6 +2052,7 @@
     display: inline-grid;
   }
   .mobile-search {
+    display: block;
     padding-bottom: var(--s-3);
   }
   .mobile-search .search {
@@ -2272,5 +2274,74 @@
   }
   .modal-foot .btn {
     width: 100%;
+  }
+}
+
+/* Rejilla de 6 columnas en escritorio (secciones de ofertas) */
+.p-grid.dense {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+@media (max-width: 640px) {
+  .p-grid.dense {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Ajustes tras revisión visual */
+.seal small {
+  display: block;
+  max-width: 82%;
+  margin-inline: auto;
+  letter-spacing: 0.06em;
+}
+.gallery-main .art {
+  aspect-ratio: 4 / 3;
+}
+.gallery-main .art-glyph {
+  width: 34%;
+  font-size: 12cqi;
+}
+.gallery-main .art-name {
+  font-size: 5cqi;
+}
+.split > .panel + .panel {
+  margin-top: 0;
+}
+
+.stat > div {
+  min-width: 0;
+}
+.stat strong {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .stat {
+    padding: var(--s-4);
+    gap: var(--s-3);
+  }
+  .stat strong {
+    font-size: 1.15rem;
+  }
+  .stat-icon {
+    width: 36px;
+    height: 36px;
+  }
+}
+.cat-card .cat-count {
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .dash-mobile-nav {
+    margin-bottom: var(--s-5);
+    padding-bottom: 2px;
+  }
+}
+@media (max-width: 640px) {
+  .table.responsive tbody tr:hover td {
+    background: none;
+  }
+  .table.responsive td:last-child:not(:first-child) {
+    grid-column: 1 / -1;
+    text-align: right;
   }
 }

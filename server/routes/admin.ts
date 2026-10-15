@@ -105,9 +105,10 @@ adminRouter.get(
 adminRouter.get(
   "/products/:id",
   ah(async (req, res) => {
-    const row = await queryOne<{ slug: string }>("SELECT slug FROM products WHERE id = ?", [intParam(req.params.id)]);
+    const row = await queryOne<{ slug: string; art_color: string | null }>("SELECT slug, art_color FROM products WHERE id = ?", [intParam(req.params.id)]);
     if (!row) throw notFound("Producto no encontrado.");
-    res.json({ product: await getProductBySlug(row.slug, true) });
+    // rawArtColor: color propio del producto (null = usa el de la categoría).
+    res.json({ product: { ...(await getProductBySlug(row.slug, true)), rawArtColor: row.art_color } });
   }),
 );
 

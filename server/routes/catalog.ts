@@ -26,7 +26,12 @@ catalogRouter.get(
     const [campaign, store] = await Promise.all([getSetting("campaign", DEFAULT_CAMPAIGN), getSetting("store", DEFAULT_STORE)]);
     res.json({
       campaign,
-      store: { storeName: store.storeName, supportEmail: store.supportEmail, supportWhatsapp: store.supportWhatsapp },
+      store: {
+        storeName: store.storeName,
+        supportEmail: store.supportEmail,
+        supportWhatsapp: store.supportWhatsapp,
+        manualPaymentInstructions: store.manualPaymentInstructions,
+      },
       paymentMethods: paymentMethods(),
       unavailableMethods: UNAVAILABLE_METHODS,
     });
