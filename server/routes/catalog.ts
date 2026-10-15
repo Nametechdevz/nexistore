@@ -32,7 +32,7 @@ catalogRouter.get(
         supportWhatsapp: store.supportWhatsapp,
         manualPaymentInstructions: store.manualPaymentInstructions,
       },
-      paymentMethods: paymentMethods(),
+      paymentMethods: await paymentMethods(),
       unavailableMethods: UNAVAILABLE_METHODS,
     });
   }),

@@ -8,7 +8,7 @@ import type { Request } from "express";
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
 import { randomToken, safeEqual } from "../lib/security.js";
-import { SignatureError, type CheckoutOrder, type PaymentAdapter, type VerifiedPayment } from "./types.js";
+import { returnUrl, SignatureError, type CheckoutOrder, type PaymentAdapter, type VerifiedPayment } from "./types.js";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -78,7 +78,7 @@ export const wompi: PaymentAdapter = {
       "amount-in-cents": String(amountInCents),
       reference,
       "signature:integrity": wompiIntegritySignature(reference, amountInCents, "COP", config.WOMPI_INTEGRITY_SECRET!),
-      "redirect-url": `${config.appUrl}/pedido/${order.code}/confirmacion?provider=wompi`,
+      "redirect-url": returnUrl(config.appUrl, order.code, "wompi"),
       "customer-data:email": order.buyerEmail,
       "customer-data:full-name": order.buyerName,
       "customer-data:phone-number": order.buyerPhone.replace(/\D/g, ""),

@@ -15,6 +15,7 @@ export default defineConfig({
       DB_PASSWORD: process.env.TEST_DB_PASSWORD ?? "nexi_local_pw",
       DB_NAME: process.env.TEST_DB_NAME ?? "nexistore_test",
       MANUAL_PAYMENTS_ENABLED: "true",
+      INVENTORY_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       WOMPI_PUBLIC_KEY: "pub_test_dummy",
       WOMPI_INTEGRITY_SECRET: "test_integrity_secret",
       WOMPI_EVENTS_SECRET: "test_events_secret",

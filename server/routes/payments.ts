@@ -17,8 +17,9 @@ paymentsRouter.post(
     if (!adapter.isConfigured() || !adapter.handleWebhook) return res.status(404).json({ error: "Proveedor no configurado." });
     try {
       const verified = await adapter.handleWebhook(req);
-      if (!verified) return res.status(200).json({ ok: true, ignored: true });
-      const result = await applyVerifiedPayment(verified);
+      const result = verified ? await applyVerifiedPayment(verified) : "ignored";
+      // Binance Pay exige esta respuesta exacta para no reintentar.
+      if (provider === "binance") return res.status(200).json({ returnCode: "SUCCESS", returnMessage: null });
       return res.status(200).json({ ok: true, result });
     } catch (err) {
       if (err instanceof SignatureError) {

@@ -30,6 +30,8 @@ export interface ProductSummary {
   isFeatured: boolean;
   ratingAvg: number | null;
   ratingCount: number;
+  deliveryMode: "manual" | "auto";
+  durationDays: number | null;
 }
 
 export interface ProductDetail extends ProductSummary {
@@ -71,6 +73,9 @@ export interface OrderItem {
   unitPrice: number;
   quantity: number;
   deliveryContent: string | null;
+  deliveryMode: "manual" | "auto";
+  /** Cuentas del inventario entregadas (entrega automática). */
+  deliveries: { id: number; status: string; content: string | null; serviceEndsAt: string | null; soldAt: string | null }[];
 }
 
 export interface OrderEvent {
@@ -85,6 +90,8 @@ export interface Order {
   status: OrderStatus;
   paymentProvider: PaymentProvider;
   paymentRef: string | null;
+  paymentCurrency: string | null;
+  paymentAmountForeign: string | null;
   subtotal: number;
   discount: number;
   total: number;
@@ -105,6 +112,9 @@ export interface PaymentMethodInfo {
   label: string;
   description: string;
   configured: boolean;
+  /** Para pagos en moneda extranjera (cripto): moneda y tasa COP por unidad. */
+  currency?: string;
+  rate?: number | null;
   /** Texto que se muestra cuando falta configuración. */
   pendingReason?: string;
 }

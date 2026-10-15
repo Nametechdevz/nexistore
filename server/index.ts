@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { execute } from "./db.js";
 import { migrate } from "./migrate.js";
+import { runAlerts } from "./services/notifications.js";
 import { expireStaleOrders } from "./services/orders.js";
 
 async function main() {
@@ -13,13 +14,16 @@ async function main() {
     console.log(`NexiStore escuchando en http://localhost:${config.PORT} (${config.NODE_ENV})`);
   });
 
-  // Mantenimiento cada hora: sesiones vencidas y pedidos sin pagar > 48 h.
+  // Mantenimiento cada hora: sesiones vencidas, pedidos sin pagar > 48 h y alertas de inventario.
   const maintenance = async () => {
     try {
       await execute("DELETE FROM sessions WHERE expires_at < UTC_TIMESTAMP()");
       await execute("DELETE FROM password_resets WHERE expires_at < (UTC_TIMESTAMP() - INTERVAL 1 DAY)");
       const n = await expireStaleOrders(48);
       if (n) console.log(`Mantenimiento: ${n} pedido(s) sin pago cancelados.`);
+      // Alertas: cuentas por vencer, servicios de clientes por terminar, vencidas y poco inventario.
+      const a = await runAlerts();
+      if (a.expired || a.customerNotices) console.log(`Alertas: ${a.expired} cuenta(s) vencida(s), ${a.customerNotices} aviso(s) a clientes.`);
     } catch (err) {
       console.error("Error en mantenimiento:", err);
     }

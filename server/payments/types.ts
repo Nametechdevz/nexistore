@@ -8,6 +8,9 @@ export interface CheckoutOrder {
   buyerEmail: string;
   buyerPhone: string;
   buyerDocument: string;
+  /** Cotización en moneda extranjera ya guardada en el pedido/recarga (cripto). */
+  foreign?: { currency: string; amount: string } | null;
+  description?: string;
 }
 
 export type CheckoutAction =
@@ -20,8 +23,10 @@ export interface VerifiedPayment {
   externalId: string;
   orderCode: string;
   status: "approved" | "pending" | "rejected";
-  amount: number; // COP enteros
+  amount: number; // COP enteros (si currency = COP)
   currency: string;
+  /** Monto en moneda extranjera tal como lo reporta el proveedor (ej. USDT). */
+  foreignAmount?: string;
   raw: unknown;
 }
 
@@ -39,3 +44,8 @@ export interface PaymentAdapter {
 }
 
 export class SignatureError extends Error {}
+
+/** URL a la que vuelve el cliente desde la pasarela (pedido o recarga de billetera). */
+export function returnUrl(appUrl: string, code: string, provider: string) {
+  return code.startsWith("WT-") ? `${appUrl}/cuenta/billetera?recarga=${code}&provider=${provider}` : `${appUrl}/pedido/${code}/confirmacion?provider=${provider}`;
+}

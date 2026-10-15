@@ -5,11 +5,12 @@ import { ah, badRequest, conflict, HttpError, intParam, likeEscape, notFound, pa
 import { requireAdmin } from "../middleware/session.js";
 import { getProductBySlug, listCategories, listProducts } from "../services/catalog.js";
 import { changeStatus, getOrder, listOrders, setDelivery } from "../services/orders.js";
-import { DEFAULT_CAMPAIGN, DEFAULT_STORE, getSetting, setSetting } from "../services/settings.js";
+import { DEFAULT_CAMPAIGN, DEFAULT_CRYPTO, DEFAULT_STORE, getSetting, setSetting } from "../services/settings.js";
 import { paymentMethods } from "../payments/index.js";
 import { ORDER_STATUSES } from "../../shared/constants.js";
 import {
   campaignSchema,
+  cryptoSettingsSchema,
   categoryInputSchema,
   couponInputSchema,
   orderDeliverySchema,
@@ -17,7 +18,6 @@ import {
   postInputSchema,
   productInputSchema,
   storeSettingsSchema,
-  ticketReplySchema,
   userAdminUpdateSchema,
 } from "../../shared/schemas.js";
 
@@ -47,7 +47,12 @@ adminRouter.get(
               (SELECT COUNT(*) FROM orders WHERE status IN ('paid','processing')) AS to_deliver,
               (SELECT COUNT(*) FROM orders WHERE status = 'pending_payment') AS pending_payment,
               (SELECT COUNT(*) FROM products WHERE is_active = 1 AND stock <= 5) AS low_stock,
-              (SELECT COUNT(*) FROM support_tickets WHERE status = 'open') AS open_tickets`,
+              (SELECT COUNT(*) FROM support_tickets WHERE status = 'open') AS open_tickets,
+              (SELECT COUNT(*) FROM support_tickets WHERE kind = 'account_issue' AND resolution IS NULL AND status <> 'closed') AS open_issues,
+              (SELECT COUNT(*) FROM inventory_items WHERE status IN ('available','sold') AND expires_at IS NOT NULL
+                  AND expires_at <= UTC_TIMESTAMP() + INTERVAL 7 DAY) AS expiring_accounts,
+              (SELECT COUNT(*) FROM inventory_items WHERE status = 'available') AS available_accounts,
+              (SELECT COUNT(*) FROM wallet_topups WHERE status = 'pending' AND provider = 'manual') AS pending_topups`,
     );
     const daily = await query<any>(
       `SELECT DATE(paid_at) AS day, SUM(total) AS total, COUNT(*) AS n FROM orders
@@ -71,7 +76,7 @@ adminRouter.get(
       series,
       recent: recent.items,
       top: top.map((t) => ({ name: t.name, units: Number(t.units), revenue: Number(t.revenue) })),
-      paymentMethods: paymentMethods(),
+      paymentMethods: await paymentMethods(),
     });
   }),
 );
@@ -115,8 +120,8 @@ adminRouter.get(
 function productParams(d: z.infer<typeof productInputSchema>) {
   return [
     d.name, d.slug, d.categoryId, d.summary, d.description, d.includesText, d.instructions, d.deliveryText, d.warrantyText,
-    d.durationLabel, d.accountLabel, d.price, d.compareAtPrice || null, d.stock, d.maxPerOrder, d.artGlyph, d.artColor,
-    d.imageUrl || null, d.isFeatured ? 1 : 0, d.isActive ? 1 : 0,
+    d.durationLabel, d.accountLabel, d.price, d.compareAtPrice || null, d.deliveryMode === "auto" ? 0 : d.stock, d.maxPerOrder, d.artGlyph, d.artColor,
+    d.imageUrl || null, d.isFeatured ? 1 : 0, d.isActive ? 1 : 0, d.deliveryMode, d.durationDays, d.lowStockThreshold,
   ];
 }
 
@@ -134,8 +139,8 @@ adminRouter.post(
     const r = await execute(
       `INSERT INTO products (name, slug, category_id, summary, description, includes_text, instructions, delivery_text, warranty_text,
                              duration_label, account_label, price, compare_at_price, stock, max_per_order, art_glyph, art_color,
-                             image_url, is_featured, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             image_url, is_featured, is_active, delivery_mode, duration_days, low_stock_threshold)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       productParams(d),
     ).catch((e) => dup(e, "slug", "Ya existe un producto con ese slug."));
     res.status(201).json({ id: r.insertId });
@@ -151,11 +156,19 @@ adminRouter.put(
     const r = await execute(
       `UPDATE products SET name = ?, slug = ?, category_id = ?, summary = ?, description = ?, includes_text = ?, instructions = ?,
               delivery_text = ?, warranty_text = ?, duration_label = ?, account_label = ?, price = ?, compare_at_price = ?, stock = ?,
-              max_per_order = ?, art_glyph = ?, art_color = ?, image_url = ?, is_featured = ?, is_active = ?
+              max_per_order = ?, art_glyph = ?, art_color = ?, image_url = ?, is_featured = ?, is_active = ?,
+              delivery_mode = ?, duration_days = ?, low_stock_threshold = ?
         WHERE id = ?`,
       [...productParams(d), id],
     ).catch((e) => dup(e, "slug", "Ya existe un producto con ese slug."));
     if (!r.affectedRows) throw notFound("Producto no encontrado.");
+    // Con entrega automática, el inventario es el número de cuentas disponibles.
+    if (d.deliveryMode === "auto") {
+      await execute(
+        "UPDATE products SET stock = (SELECT COUNT(*) FROM inventory_items WHERE product_id = ? AND status = 'available') WHERE id = ?",
+        [id, id],
+      );
+    }
     res.json({ ok: true });
   }),
 );
@@ -165,6 +178,8 @@ adminRouter.patch(
   ah(async (req, res) => {
     const id = intParam(req.params.id);
     const { delta } = parse(z.object({ delta: z.number().int().min(-100000).max(100000) }), req.body);
+    const mode = await queryOne<{ delivery_mode: string }>("SELECT delivery_mode FROM products WHERE id = ?", [id]);
+    if (mode?.delivery_mode === "auto") throw conflict("Este producto usa inventario de cuentas: agrega o retira cuentas en Inventario.");
     const r = await execute("UPDATE products SET stock = GREATEST(stock + ?, 0) WHERE id = ?", [delta, id]);
     if (!r.affectedRows) throw notFound("Producto no encontrado.");
     const row = await queryOne<{ stock: number }>("SELECT stock FROM products WHERE id = ?", [id]);
@@ -272,7 +287,7 @@ adminRouter.post(
   "/orders/:code/status",
   ah(async (req, res) => {
     const d = parse(orderStatusUpdateSchema, req.body);
-    await changeStatus(String(req.params.code), d.status, { actor: "admin", note: d.note });
+    await changeStatus(String(req.params.code), d.status, { actor: "admin", note: d.note, refundToWallet: d.refundToWallet });
     res.json({ order: await getOrder(String(req.params.code), undefined, true) });
   }),
 );
@@ -302,7 +317,7 @@ adminRouter.get(
     const where = q ? "WHERE u.name LIKE ? OR u.email LIKE ?" : "";
     const params = q ? [`%${likeEscape(q)}%`, `%${likeEscape(q)}%`] : [];
     const rows = await query<any>(
-      `SELECT u.id, u.name, u.email, u.phone, u.role, u.is_active, u.created_at,
+      `SELECT u.id, u.name, u.email, u.phone, u.role, u.is_active, u.created_at, u.wallet_balance,
               (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS orders,
               (SELECT COALESCE(SUM(total),0) FROM orders o WHERE o.user_id = u.id AND o.status IN ${PAID}) AS spent
          FROM users u ${where} ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
@@ -320,6 +335,7 @@ adminRouter.get(
         createdAt: toIso(r.created_at),
         orders: Number(r.orders),
         spent: Number(r.spent),
+        walletBalance: Number(r.wallet_balance),
       })),
       total: Number(total?.n ?? 0),
       page,
@@ -469,42 +485,6 @@ adminRouter.delete(
   }),
 );
 
-/* ---------- Soporte ---------- */
-
-adminRouter.get(
-  "/tickets",
-  ah(async (req, res) => {
-    const status = ["open", "answered", "closed"].includes(String(req.query.status)) ? String(req.query.status) : null;
-    const rows = await query<any>(
-      `SELECT t.*, u.name, u.email FROM support_tickets t JOIN users u ON u.id = t.user_id
-        ${status ? "WHERE t.status = ?" : ""} ORDER BY t.status = 'open' DESC, t.created_at DESC LIMIT 100`,
-      status ? [status] : [],
-    );
-    res.json({
-      items: rows.map((r) => ({
-        id: r.id,
-        subject: r.subject,
-        message: r.message,
-        orderCode: r.order_code,
-        status: r.status,
-        adminReply: r.admin_reply,
-        createdAt: toIso(r.created_at),
-        customer: { name: r.name, email: r.email },
-      })),
-    });
-  }),
-);
-
-adminRouter.post(
-  "/tickets/:id/reply",
-  ah(async (req, res) => {
-    const d = parse(ticketReplySchema, req.body);
-    const r = await execute("UPDATE support_tickets SET admin_reply = ?, status = ? WHERE id = ?", [d.reply, d.status, intParam(req.params.id)]);
-    if (!r.affectedRows) throw notFound("Solicitud no encontrada.");
-    res.json({ ok: true });
-  }),
-);
-
 /* ---------- Configuración ---------- */
 
 adminRouter.get(
@@ -513,7 +493,8 @@ adminRouter.get(
     res.json({
       campaign: await getSetting("campaign", DEFAULT_CAMPAIGN),
       store: await getSetting("store", DEFAULT_STORE),
-      paymentMethods: paymentMethods(),
+      crypto: await getSetting("crypto", DEFAULT_CRYPTO),
+      paymentMethods: await paymentMethods(),
     });
   }),
 );
@@ -530,6 +511,14 @@ adminRouter.put(
   "/settings/store",
   ah(async (req, res) => {
     await setSetting("store", parse(storeSettingsSchema, req.body));
+    res.json({ ok: true });
+  }),
+);
+
+adminRouter.put(
+  "/settings/crypto",
+  ah(async (req, res) => {
+    await setSetting("crypto", parse(cryptoSettingsSchema, req.body));
     res.json({ ok: true });
   }),
 );

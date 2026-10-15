@@ -3,7 +3,7 @@
  * El cliente los usa para mostrar errores al instante; el servidor los vuelve a aplicar siempre.
  */
 import { z } from "zod";
-import { CART_MAX_QTY, ORDER_STATUSES, PAYMENT_PROVIDERS } from "./constants.js";
+import { CART_MAX_QTY, ORDER_STATUSES, PAYMENT_PROVIDERS, TOPUP_PROVIDERS, WALLET_MAX_TOPUP, WALLET_MIN_TOPUP } from "./constants.js";
 
 const trimmed = (min: number, max: number, label: string) =>
   z
@@ -179,6 +179,9 @@ export const productInputSchema = z
       .default(""),
     isFeatured: z.boolean().default(false),
     isActive: z.boolean().default(true),
+    deliveryMode: z.enum(["manual", "auto"]).default("manual"),
+    durationDays: z.number().int().min(1, "Mínimo 1 día.").max(3650).nullable().default(null),
+    lowStockThreshold: z.number().int().min(0).max(100000).default(5),
   })
   .refine((p) => p.compareAtPrice === null || p.compareAtPrice === 0 || p.compareAtPrice > p.price, {
     path: ["compareAtPrice"],
@@ -205,6 +208,7 @@ export const couponInputSchema = z
 export const orderStatusUpdateSchema = z.object({
   status: z.enum(ORDER_STATUSES),
   note: z.string().trim().max(500).optional().default(""),
+  refundToWallet: z.boolean().optional().default(false),
 });
 
 export const orderDeliverySchema = z.object({
@@ -260,6 +264,77 @@ export type CategoryInput = z.infer<typeof categoryInputSchema>;
 export type CouponInput = z.infer<typeof couponInputSchema>;
 export type CampaignSettings = z.infer<typeof campaignSchema>;
 export type StoreSettings = z.infer<typeof storeSettingsSchema>;
+
+/* ---------- Billetera ---------- */
+
+export const topupSchema = z.object({
+  amount: z
+    .number({ error: "Ingresa un monto." })
+    .int("Usa pesos sin decimales.")
+    .min(WALLET_MIN_TOPUP, `La recarga mínima es $${WALLET_MIN_TOPUP.toLocaleString("es-CO")}.`)
+    .max(WALLET_MAX_TOPUP, `La recarga máxima es $${WALLET_MAX_TOPUP.toLocaleString("es-CO")}.`),
+  provider: z.enum(TOPUP_PROVIDERS, { error: "Selecciona un método de pago." }),
+});
+
+export const walletAdjustSchema = z.object({
+  amount: z.number().int().refine((v) => v !== 0, "El monto no puede ser 0.").refine((v) => Math.abs(v) <= 10_000_000, "Monto demasiado alto."),
+  note: trimmed(3, 255, "El motivo"),
+});
+
+export const cryptoSettingsSchema = z.object({
+  copPerUsdt: z.number().positive("La tasa debe ser mayor que 0.").max(100_000).nullable(),
+});
+
+/* ---------- Soporte ---------- */
+
+export const ticketMessageSchema = z.object({
+  body: trimmed(2, 4000, "El mensaje"),
+});
+
+export const ISSUE_REASONS = {
+  caida: "La cuenta no funciona / se cayó",
+  clave: "La contraseña cambió o es incorrecta",
+  perfil: "Problema con el perfil o pantallas",
+  otro: "Otro problema",
+} as const;
+
+export const reportIssueSchema = z.object({
+  inventoryItemId: z.number().int().positive().optional(),
+  reason: z.enum(Object.keys(ISSUE_REASONS) as [keyof typeof ISSUE_REASONS, ...(keyof typeof ISSUE_REASONS)[]]),
+  message: z.string().trim().max(2000).optional().default(""),
+});
+
+export const ticketAdminMessageSchema = z.object({
+  body: trimmed(2, 4000, "El mensaje"),
+  status: z.enum(["open", "answered", "closed"]).default("answered"),
+});
+
+export const resolveTicketSchema = z.object({
+  action: z.enum(["replace", "refund"]),
+  amount: z.number().int().min(1).max(50_000_000).optional(),
+  message: z.string().trim().max(4000).optional().default(""),
+});
+
+/* ---------- Inventario ---------- */
+
+export const inventoryBulkSchema = z.object({
+  productId: z.number({ error: "Selecciona un producto." }).int().positive("Selecciona un producto."),
+  lines: trimmed(3, 200_000, "Las cuentas"),
+  expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (AAAA-MM-DD).").nullable().default(null),
+});
+
+export const inventoryUpdateSchema = z.object({
+  label: z.string().trim().max(160).default(""),
+  content: z.string().trim().max(4000).optional(),
+  expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (AAAA-MM-DD).").nullable().default(null),
+  status: z.enum(["available", "disabled"]).optional(),
+  notes: z.string().trim().max(500).default(""),
+});
+
+export const inventoryFallSchema = z.object({
+  replace: z.boolean().default(true),
+  note: z.string().trim().max(300).default(""),
+});
 
 /** Convierte un ZodError en { campo: mensaje } (primer error por campo). */
 export function fieldErrors(error: z.ZodError): Record<string, string> {

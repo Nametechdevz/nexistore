@@ -40,8 +40,33 @@ export const ORDER_FILTERS = {
 } as const satisfies Record<string, readonly OrderStatus[] | null>;
 export type OrderFilter = keyof typeof ORDER_FILTERS;
 
-export const PAYMENT_PROVIDERS = ["mercadopago", "wompi", "manual"] as const;
+export const PAYMENT_PROVIDERS = ["wompi", "mercadopago", "binance", "manual", "wallet"] as const;
+/** Pasarelas con las que se puede recargar la billetera (no se recarga billetera con billetera). */
+export const TOPUP_PROVIDERS = ["wompi", "mercadopago", "binance", "manual"] as const;
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
 
 export const CART_MAX_QTY = 10;
 export const CURRENCY = "COP";
+
+export const INVENTORY_STATUSES = ["available", "reserved", "sold", "fallen", "expired", "disabled"] as const;
+export type InventoryStatus = (typeof INVENTORY_STATUSES)[number];
+export const INVENTORY_STATUS_LABEL: Record<InventoryStatus, string> = {
+  available: "Disponible",
+  reserved: "Reservada",
+  sold: "Vendida",
+  fallen: "Caída",
+  expired: "Vencida",
+  disabled: "Deshabilitada",
+};
+
+export const WALLET_TX_LABEL = {
+  topup: "Recarga",
+  purchase: "Compra",
+  refund: "Reembolso",
+  adjustment: "Ajuste",
+} as const;
+
+/** Días de anticipación para avisar vencimientos. */
+export const EXPIRY_WARNING_DAYS = 7;
+export const WALLET_MIN_TOPUP = 10_000;
+export const WALLET_MAX_TOPUP = 2_000_000;

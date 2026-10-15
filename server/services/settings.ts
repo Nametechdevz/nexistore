@@ -34,3 +34,9 @@ export async function getSetting<T>(name: string, fallback: T): Promise<T> {
 export async function setSetting(name: string, value: unknown): Promise<void> {
   await execute("INSERT INTO settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [name, JSON.stringify(value)]);
 }
+
+export interface CryptoSettings {
+  /** Pesos colombianos por 1 USDT. null = Binance Pay deshabilitado hasta que el admin la defina. */
+  copPerUsdt: number | null;
+}
+export const DEFAULT_CRYPTO: CryptoSettings = { copPerUsdt: null };

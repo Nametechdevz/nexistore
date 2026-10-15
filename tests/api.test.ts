@@ -217,7 +217,7 @@ describe("administración", () => {
   it("gestiona el ciclo de vida del pedido y la entrega", async () => {
     const u = await registered();
     const a = await adminClient();
-    const p = await product("lumen-ai-pro");
+    const p = await product("fit-app-pro");
     await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
     const { code } = (await u.post("/api/checkout").send(checkoutBody("manual"))).body;
     expect((await a.post(`/api/admin/orders/${code}/status`).send({ status: "completed" })).status).toBe(409);
@@ -235,7 +235,7 @@ describe("administración", () => {
     expect(mine.events.map((e: { status: string }) => e.status)).toEqual(["pending_payment", "paid", "completed"]);
     // Ahora el cliente puede calificar.
     await u.post(`/api/products/${p.id}/reviews`).send({ rating: 5, comment: "Excelente" }).expect(201);
-    expect((await product("lumen-ai-pro") as unknown as { ratingCount: number }).ratingCount).toBe(1);
+    expect((await product("fit-app-pro") as unknown as { ratingCount: number }).ratingCount).toBe(1);
   });
 
   it("no permite al administrador marcar como pagado un pedido de pasarela", async () => {

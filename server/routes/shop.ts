@@ -4,10 +4,11 @@ import { z } from "zod";
 import { execute, query, queryOne, transaction } from "../db.js";
 import { ah, badRequest, conflict, HttpError, notFound, parse } from "../lib/http.js";
 import { requireAuth } from "../middleware/session.js";
-import { adapters } from "../payments/index.js";
+import { adapters, cryptoRate, isProviderReady, toUsdt } from "../payments/index.js";
 import { applyVerifiedPayment, changeStatus, createOrder, getOrder, listOrders, quoteCart } from "../services/orders.js";
 import { ORDER_FILTERS, type OrderFilter } from "../../shared/constants.js";
-import { cartLineSchema, cartSyncSchema, checkoutSchema, couponCodeSchema, reviewSchema } from "../../shared/schemas.js";
+import { cartLineSchema, cartSyncSchema, checkoutSchema, couponCodeSchema, reportIssueSchema, reviewSchema } from "../../shared/schemas.js";
+import { reportIssue } from "../services/support.js";
 
 export const shopRouter = Router();
 
@@ -77,14 +78,21 @@ shopRouter.post(
   ah(async (req, res) => {
     const input = parse(checkoutSchema, req.body);
     const adapter = adapters[input.paymentProvider];
-    if (!adapter.isConfigured()) {
-      throw badRequest(`${adapter.label} no está disponible: ${adapter.pendingReason}`, { paymentProvider: adapter.pendingReason });
+    const ready = await isProviderReady(input.paymentProvider);
+    if (!ready.ok) {
+      throw badRequest(`${adapter.label} no está disponible: ${ready.reason}`, { paymentProvider: ready.reason ?? "" });
     }
     const lines = await readCart(req.user!.id);
     if (!lines.length) throw badRequest("Tu carrito está vacío.");
-    const order = await createOrder(req.user!.id, lines, { ...input, couponCode: input.couponCode || undefined });
+    const rate = input.paymentProvider === "binance" ? await cryptoRate() : null;
+    const order = await createOrder(req.user!.id, lines, { ...input, couponCode: input.couponCode || undefined }, {
+      quoteForeign: rate ? (total) => ({ currency: "USDT", amount: toUsdt(total, rate) }) : undefined,
+    });
     if (input.paymentProvider !== req.user!.preferredPayment) {
       await execute("UPDATE users SET preferred_payment = ? WHERE id = ?", [input.paymentProvider, req.user!.id]);
+    }
+    if (input.paymentProvider === "wallet") {
+      return res.status(201).json({ code: order.code, action: { type: "instructions", text: "Pagado con saldo de la billetera." }, status: order.status });
     }
     let action;
     try {
@@ -95,13 +103,14 @@ shopRouter.post(
         buyerEmail: input.buyerEmail,
         buyerPhone: input.buyerPhone,
         buyerDocument: input.buyerDocument,
+        foreign: order.foreign,
       });
     } catch (err) {
       console.error("Error creando checkout:", err);
       // El pedido existe y queda pendiente: el cliente puede reintentar el pago desde "Mis pedidos".
       return res.status(201).json({ code: order.code, action: null, warning: "No pudimos conectar con la pasarela. Intenta pagar de nuevo desde tu pedido." });
     }
-    res.status(201).json({ code: order.code, action });
+    res.status(201).json({ code: order.code, action, status: order.status });
   }),
 );
 
@@ -166,8 +175,11 @@ shopRouter.post(
     const order = await getOrder(String(req.params.code), req.user!.id);
     if (order.status !== "pending_payment") throw conflict("Este pedido no está pendiente de pago.");
     const adapter = adapters[order.paymentProvider];
-    if (!adapter?.isConfigured()) throw badRequest(`${adapter?.label ?? "El método"} no está disponible en este momento.`);
-    const action = await adapter.createCheckout(order).catch((err) => {
+    if (!adapter || order.paymentProvider === "wallet" || !(await isProviderReady(order.paymentProvider)).ok) {
+      throw badRequest(`${adapter?.label ?? "El método"} no está disponible en este momento.`);
+    }
+    const foreign = order.paymentCurrency && order.paymentAmountForeign ? { currency: order.paymentCurrency, amount: order.paymentAmountForeign } : null;
+    const action = await adapter.createCheckout({ ...order, foreign }).catch((err) => {
       console.error(err);
       throw new HttpError(502, "No pudimos conectar con la pasarela de pago. Inténtalo más tarde.");
     });
@@ -195,6 +207,17 @@ shopRouter.post(
       }
     }
     res.json({ result, order: await getOrder(order.code, req.user!.id) });
+  }),
+);
+
+/** Reporte de cuenta caída desde el detalle del pedido: abre un caso de soporte vinculado. */
+shopRouter.post(
+  "/orders/:code/items/:itemId/report",
+  requireAuth,
+  ah(async (req, res) => {
+    const data = parse(reportIssueSchema, req.body);
+    const id = await reportIssue(req.user!.id, String(req.params.code), Number(req.params.itemId) || 0, data);
+    res.status(201).json({ ticketId: id });
   }),
 );
 

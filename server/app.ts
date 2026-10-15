@@ -7,6 +7,7 @@ import { HttpError } from "./lib/http.js";
 import { ensureCsrf, loadSession, parseCookies, verifyCsrf } from "./middleware/session.js";
 import { accountRouter } from "./routes/account.js";
 import { adminRouter } from "./routes/admin.js";
+import { adminOpsRouter } from "./routes/admin-ops.js";
 import { authRouter } from "./routes/auth.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { paymentsRouter } from "./routes/payments.js";
@@ -28,7 +29,7 @@ export function createApp() {
           "img-src": ["'self'", "data:", "https:"],
           "font-src": ["'self'", "data:"],
           "connect-src": ["'self'"],
-          "form-action": ["'self'", "https://checkout.wompi.co", "https://www.mercadopago.com.co", "https://accounts.google.com"],
+          "form-action": ["'self'", "https://checkout.wompi.co", "https://www.mercadopago.com.co", "https://pay.binance.com", "https://accounts.google.com"],
           "frame-ancestors": ["'none'"],
           "upgrade-insecure-requests": config.isProd ? [] : null,
         },
@@ -38,12 +39,23 @@ export function createApp() {
   );
 
   // Webhooks: cuerpo JSON propio, sin CSRF.
-  app.use("/api/payments", express.json({ limit: "200kb" }), paymentsRouter);
+  // Se guarda el cuerpo original: Binance Pay firma los bytes exactos del webhook.
+  app.use(
+    "/api/payments",
+    express.json({
+      limit: "200kb",
+      verify: (req, _res, buf) => {
+        (req as unknown as { rawBody: Buffer }).rawBody = buf;
+      },
+    }),
+    paymentsRouter,
+  );
 
   app.use("/api", express.json({ limit: "200kb" }), parseCookies, loadSession, ensureCsrf, verifyCsrf);
   app.use("/api/auth", authRouter);
   app.use("/api/catalog", catalogRouter);
   app.use("/api/account", accountRouter);
+  app.use("/api/admin", adminOpsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api", shopRouter);
   app.get("/api/health", (_req, res) => {

@@ -1,4 +1,5 @@
 import { execute, queryOne } from "./db.js";
+import { seal, vaultConfigured } from "./lib/vault.js";
 import { seedCategories, seedCoupons, seedPosts, seedProductDefaults, seedProducts } from "./seed-data.js";
 
 export async function seedCatalog(): Promise<void> {
@@ -19,6 +20,25 @@ export async function seedCatalog(): Promise<void> {
         seedProductDefaults.warranty, p.duration, p.account, p.price, p.compareAt ?? null, p.stock, p.glyph, p.featured ? 1 : 0,
       ],
     );
+  }
+  // Productos de ejemplo con entrega automática e inventario de cuentas FICTICIAS (solo si hay llave de cifrado).
+  if (vaultConfigured()) {
+    for (const [slug, days, n] of [["cineplus-premium-anual", 365, 8], ["sonora-premium-anual", 365, 6], ["lumen-ai-pro", 30, 4]] as const) {
+      const p = await queryOne<{ id: number }>("SELECT id FROM products WHERE slug = ?", [slug]);
+      if (!p) continue;
+      await execute("UPDATE products SET delivery_mode = 'auto', duration_days = ?, low_stock_threshold = 3 WHERE id = ?", [days, p.id]);
+      for (let i = 1; i <= n; i++) {
+        const label = `demo${i}@${slug.split("-")[0]}.test`;
+        const expires = new Date(Date.now() + (i === 1 ? 5 : 400) * 86_400_000);
+        await execute("INSERT INTO inventory_items (product_id, label, content, expires_at) VALUES (?, ?, ?, ?)", [
+          p.id,
+          `${label} · perfil ${i}`,
+          seal(`Usuario: ${label}\nClave: Demo-${i}${i}${i}\nPerfil: ${i}`),
+          expires,
+        ]);
+      }
+      await execute("UPDATE products SET stock = ? WHERE id = ?", [n, p.id]);
+    }
   }
   for (const c of seedCoupons) {
     await execute("INSERT INTO coupons (code, description, kind, value, min_subtotal) VALUES (?, ?, ?, ?, ?)", [

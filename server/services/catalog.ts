@@ -8,6 +8,7 @@ import type { Category, ProductDetail, ProductSummary } from "../../shared/types
 export const PRODUCT_COLUMNS = `
   p.id, p.slug, p.name, p.summary, p.price, p.compare_at_price, p.stock, p.max_per_order,
   p.art_glyph, p.art_color, p.image_url, p.is_featured, p.is_active, p.category_id,
+  p.delivery_mode, p.duration_days, p.low_stock_threshold,
   c.slug AS category_slug, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
   (SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.product_id = p.id) AS rating_avg,
   (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.id) AS rating_count`;
@@ -31,6 +32,8 @@ export function mapProduct(r: any): ProductSummary {
     isFeatured: toBool(r.is_featured),
     ratingAvg: r.rating_avg === null || r.rating_avg === undefined ? null : Number(r.rating_avg),
     ratingCount: Number(r.rating_count ?? 0),
+    deliveryMode: r.delivery_mode === "auto" ? "auto" : "manual",
+    durationDays: r.duration_days === null || r.duration_days === undefined ? null : Number(r.duration_days),
   };
 }
 

@@ -5,7 +5,12 @@ import { ah, HttpError, intParam, notFound, parse } from "../lib/http.js";
 import { hashPassword, verifyPassword } from "../lib/security.js";
 import { requireAuth } from "../middleware/session.js";
 import { PAYMENT_PROVIDERS } from "../../shared/constants.js";
-import { addressSchema, changePasswordSchema, profileSchema, ticketSchema } from "../../shared/schemas.js";
+import { addressSchema, changePasswordSchema, profileSchema, ticketMessageSchema, ticketSchema, topupSchema } from "../../shared/schemas.js";
+import { adapters, cryptoRate, isProviderReady, toUsdt } from "../payments/index.js";
+import { listNotifications, markRead, notify } from "../services/notifications.js";
+import { applyVerifiedPayment } from "../services/orders.js";
+import { addMessage, createTicket, getTicket, listTickets } from "../services/support.js";
+import { newTopupCode, walletSummary } from "../services/wallet.js";
 
 export const accountRouter = Router();
 accountRouter.use(requireAuth);
@@ -51,14 +56,16 @@ accountRouter.put(
 accountRouter.get(
   "/summary",
   ah(async (req, res) => {
-    const counts = await queryOne<{ total: number; completed: number; pending: number; spent: number }>(
+    const counts = await queryOne<{ total: number; completed: number; pending: number; spent: number; wallet: number }>(
       `SELECT COUNT(*) AS total, SUM(status = 'completed') AS completed,
               SUM(status IN ('pending_payment','paid','processing')) AS pending,
-              COALESCE(SUM(CASE WHEN status IN ('paid','processing','completed') THEN total END), 0) AS spent
+              COALESCE(SUM(CASE WHEN status IN ('paid','processing','completed') THEN total END), 0) AS spent,
+              (SELECT wallet_balance FROM users WHERE id = ?) AS wallet
          FROM orders WHERE user_id = ?`,
-      [req.user!.id],
+      [req.user!.id, req.user!.id],
     );
     res.json({
+      wallet: Number(counts?.wallet ?? 0),
       total: Number(counts?.total ?? 0),
       completed: Number(counts?.completed ?? 0),
       pending: Number(counts?.pending ?? 0),
@@ -162,23 +169,19 @@ accountRouter.get(
   }),
 );
 
-/* ---------- Soporte ---------- */
+/* ---------- Soporte (conversación) ---------- */
 
 accountRouter.get(
   "/tickets",
   ah(async (req, res) => {
-    const rows = await query<Record<string, unknown>>("SELECT * FROM support_tickets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", [req.user!.id]);
-    res.json({
-      items: rows.map((r) => ({
-        id: r.id,
-        subject: r.subject,
-        message: r.message,
-        orderCode: r.order_code,
-        status: r.status,
-        adminReply: r.admin_reply,
-        createdAt: toIso(r.created_at),
-      })),
-    });
+    res.json({ items: await listTickets({ userId: req.user!.id }) });
+  }),
+);
+
+accountRouter.get(
+  "/tickets/:id",
+  ah(async (req, res) => {
+    res.json({ ticket: await getTicket(intParam(req.params.id), req.user!.id) });
   }),
 );
 
@@ -192,12 +195,109 @@ accountRouter.post(
     }
     const open = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM support_tickets WHERE user_id = ? AND status = 'open'", [req.user!.id]);
     if (Number(open?.n) >= 5) throw new HttpError(429, "Tienes 5 solicitudes abiertas. Espera nuestra respuesta antes de crear otra.");
-    await execute("INSERT INTO support_tickets (user_id, order_code, subject, message) VALUES (?, ?, ?, ?)", [
+    const id = await createTicket(req.user!.id, { subject: data.subject, message: data.message, orderCode: data.orderCode || null });
+    res.status(201).json({ id });
+  }),
+);
+
+accountRouter.post(
+  "/tickets/:id/messages",
+  ah(async (req, res) => {
+    const { body } = parse(ticketMessageSchema, req.body);
+    await addMessage(intParam(req.params.id), { role: "customer", id: req.user!.id }, body);
+    res.status(201).json({ ticket: await getTicket(intParam(req.params.id), req.user!.id) });
+  }),
+);
+
+/* ---------- Notificaciones ---------- */
+
+accountRouter.get(
+  "/notifications",
+  ah(async (req, res) => {
+    res.json(await listNotifications("user", req.user!.id));
+  }),
+);
+
+accountRouter.post(
+  "/notifications/read",
+  ah(async (req, res) => {
+    const { ids } = parse(z.object({ ids: z.union([z.literal("all"), z.array(z.number().int().positive()).max(100)]) }), req.body);
+    await markRead("user", req.user!.id, ids);
+    res.json({ ok: true });
+  }),
+);
+
+/* ---------- Billetera ---------- */
+
+accountRouter.get(
+  "/wallet",
+  ah(async (req, res) => {
+    res.json(await walletSummary(req.user!.id));
+  }),
+);
+
+accountRouter.post(
+  "/wallet/topups",
+  ah(async (req, res) => {
+    const data = parse(topupSchema, req.body);
+    const ready = await isProviderReady(data.provider);
+    const adapter = adapters[data.provider];
+    if (!ready.ok) throw new HttpError(422, `${adapter.label} no está disponible.`, { provider: ready.reason ?? "" });
+    const pending = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM wallet_topups WHERE user_id = ? AND status = 'pending'", [req.user!.id]);
+    if (Number(pending?.n) >= 3) throw new HttpError(429, "Tienes 3 recargas pendientes. Complétalas o espera a que venzan.");
+    const rate = data.provider === "binance" ? await cryptoRate() : null;
+    const foreign = rate ? { currency: "USDT", amount: toUsdt(data.amount, rate) } : null;
+    const code = newTopupCode();
+    await execute(
+      "INSERT INTO wallet_topups (code, user_id, amount, provider, payment_currency, payment_amount_foreign) VALUES (?, ?, ?, ?, ?, ?)",
+      [code, req.user!.id, data.amount, data.provider, foreign?.currency ?? null, foreign?.amount ?? null],
+    );
+    const u = req.user!;
+    let action;
+    try {
+      action = await adapter.createCheckout({
+        code,
+        total: data.amount,
+        buyerName: u.name,
+        buyerEmail: u.email,
+        buyerPhone: u.phone ?? "",
+        buyerDocument: u.documentId ?? "",
+        foreign,
+        description: `Recarga de billetera NexiStore ${code}`,
+      });
+    } catch (err) {
+      console.error("Error creando recarga:", err);
+      await execute("UPDATE wallet_topups SET status = 'cancelled' WHERE code = ?", [code]);
+      throw new HttpError(502, "No pudimos conectar con la pasarela de pago. Inténtalo más tarde.");
+    }
+    if (data.provider === "manual") {
+      await notify({ audience: "admin", kind: "topup", title: `Recarga por transferencia pendiente: ${code}`, body: `${u.name} · ${data.amount} COP`, link: "/admin/billetera" });
+    }
+    res.status(201).json({ code, action, foreign });
+  }),
+);
+
+/** Consulta activa del pago de una recarga al volver de la pasarela. */
+accountRouter.post(
+  "/wallet/topups/:code/verify",
+  ah(async (req, res) => {
+    const t = await queryOne<{ code: string; provider: string; status: string }>("SELECT code, provider, status FROM wallet_topups WHERE code = ? AND user_id = ?", [
+      String(req.params.code),
       req.user!.id,
-      data.orderCode || null,
-      data.subject,
-      data.message,
     ]);
-    res.status(201).json({ ok: true });
+    if (!t) throw notFound("Recarga no encontrada.");
+    let result = "skipped";
+    const adapter = adapters[t.provider as keyof typeof adapters];
+    if (t.status === "pending" && adapter?.verify && adapter.isConfigured()) {
+      const params = z.record(z.string(), z.string().max(100)).catch({}).parse(req.body?.params ?? {});
+      try {
+        const v = await adapter.verify(t.code, params);
+        result = v && v.orderCode === t.code ? await applyVerifiedPayment(v) : "not_found";
+      } catch (err) {
+        console.error("Error verificando recarga:", err);
+        result = "error";
+      }
+    }
+    res.json({ result, wallet: await walletSummary(req.user!.id) });
   }),
 );

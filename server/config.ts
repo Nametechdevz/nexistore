@@ -43,6 +43,12 @@ const schema = z.object({
   WOMPI_INTEGRITY_SECRET: z.string().optional(),
   WOMPI_EVENTS_SECRET: z.string().optional(),
 
+  BINANCE_PAY_API_KEY: z.string().optional(),
+  BINANCE_PAY_SECRET_KEY: z.string().optional(),
+
+  /** 32 bytes (64 hex o base64) para cifrar las credenciales del inventario. */
+  INVENTORY_ENCRYPTION_KEY: z.string().optional(),
+
   MANUAL_PAYMENTS_ENABLED: bool,
 });
 

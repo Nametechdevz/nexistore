@@ -7,7 +7,7 @@
 import type { Request } from "express";
 import { config } from "../config.js";
 import { hmacSha256, safeEqual } from "../lib/security.js";
-import { SignatureError, type CheckoutOrder, type PaymentAdapter, type VerifiedPayment } from "./types.js";
+import { returnUrl, SignatureError, type CheckoutOrder, type PaymentAdapter, type VerifiedPayment } from "./types.js";
 
 const API = "https://api.mercadopago.com";
 
@@ -77,12 +77,12 @@ export const mercadoPago: PaymentAdapter = {
   isConfigured: () => Boolean(config.MP_ACCESS_TOKEN),
 
   async createCheckout(order: CheckoutOrder) {
-    const back = `${config.appUrl}/pedido/${order.code}/confirmacion?provider=mercadopago`;
+    const back = returnUrl(config.appUrl, order.code, "mercadopago");
     const pref = await mpFetch<{ init_point: string }>("/checkout/preferences", {
       method: "POST",
       headers: { "x-idempotency-key": `pref-${order.code}-${Date.now()}` },
       body: JSON.stringify({
-        items: [{ id: order.code, title: `Pedido ${order.code} — NexiStore`, quantity: 1, unit_price: order.total, currency_id: "COP" }],
+        items: [{ id: order.code, title: order.description ?? `Pedido ${order.code} — NexiStore`, quantity: 1, unit_price: order.total, currency_id: "COP" }],
         payer: { name: order.buyerName, email: order.buyerEmail },
         external_reference: order.code,
         back_urls: { success: back, pending: back, failure: back },
