@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { execute, getPool, query } from "./db.js";
+import { appRoot } from "./lib/paths.js";
 
 /** Separa un archivo .sql en sentencias (las migraciones no usan ';' dentro de literales). */
 function splitStatements(sql: string): string[] {
@@ -13,7 +14,7 @@ function splitStatements(sql: string): string[] {
     .filter(Boolean);
 }
 
-export async function migrate(dir = resolve(process.cwd(), "db/migrations"), log = console.log): Promise<string[]> {
+export async function migrate(dir = resolve(appRoot(), "db/migrations"), log = console.log): Promise<string[]> {
   await execute(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
        version VARCHAR(120) PRIMARY KEY,

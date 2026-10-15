@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { appRoot } from "./lib/paths.js";
 import { z } from "zod";
 
 // Carga .env si existe (Node >= 20.12). En Hostinger las variables se definen en el panel.
-const envFile = resolve(process.cwd(), ".env");
+const envFile = resolve(appRoot(), ".env");
 if (existsSync(envFile) && typeof process.loadEnvFile === "function" && process.env.NODE_ENV !== "test") {
   process.loadEnvFile(envFile);
 }

@@ -18,7 +18,8 @@
     "admin:create": "tsx server/cli/create-admin.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
-    "e2e": "node tests/e2e/run.mjs"
+    "e2e": "node tests/e2e/run.mjs",
+    "package:hostinger": "node scripts/package-hostinger.mjs"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",

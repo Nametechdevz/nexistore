@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { config } from "./config.js";
 import { HttpError } from "./lib/http.js";
+import { appRoot } from "./lib/paths.js";
 import { ensureCsrf, loadSession, parseCookies, verifyCsrf } from "./middleware/session.js";
 import { accountRouter } from "./routes/account.js";
 import { adminRouter } from "./routes/admin.js";
@@ -66,7 +67,7 @@ export function createApp() {
   });
 
   // Frontend compilado (producción). Rutas del SPA → index.html.
-  const clientDir = resolve(process.cwd(), "dist/client");
+  const clientDir = resolve(appRoot(), "dist/client");
   if (existsSync(clientDir)) {
     app.use(express.static(clientDir, { index: false, maxAge: "1y", immutable: true, setHeaders: noCacheHtml }));
     app.get(/^(?!\/api\/).*/, (_req, res) => {
