@@ -30,7 +30,16 @@ export const useSession = () => useContext(SessionCtx);
 
 export interface StoreInfo {
   campaign: CampaignSettings;
-  store: { storeName: string; supportEmail: string; supportWhatsapp: string; manualPaymentInstructions: string };
+  store: {
+    storeName: string;
+    supportEmail: string;
+    supportWhatsapp: string;
+    manualPaymentInstructions: string;
+    legalName?: string;
+    legalId?: string;
+    legalAddress?: string;
+    legalCity?: string;
+  };
   paymentMethods: PaymentMethodInfo[];
   unavailableMethods: { id: string; label: string; reason: string }[];
 }

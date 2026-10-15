@@ -26,6 +26,10 @@ export const DEFAULT_STORE: StoreSettings = {
   supportWhatsapp: "",
   manualPaymentInstructions:
     "Realiza la transferencia por el valor exacto del pedido y envía el comprobante a soporte indicando el código del pedido. Tu pedido se confirmará cuando verifiquemos el pago.",
+  legalName: "",
+  legalId: "",
+  legalAddress: "",
+  legalCity: "",
 };
 
 export async function getSetting<T>(name: string, fallback: T): Promise<T> {

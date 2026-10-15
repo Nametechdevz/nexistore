@@ -160,5 +160,5 @@ Crea credenciales OAuth en Google Cloud con la URI de redirección `{URL}/api/au
 ## Pendiente antes de vender
 
 - Reemplazar los productos de ejemplo por el catálogo real.
-- Sustituir los textos de **Términos** y **Privacidad** por versiones revisadas legalmente (Ley 1480 de 2011 y Ley 1581 de 2012).
+- Completar los datos legales (razón social, NIT, dirección) en *Configuración → Datos de la tienda* y hacer revisar Términos y Privacidad (Ley 1480 de 2011 y Ley 1581 de 2012) por un abogado.
 - Configurar las credenciales de la pasarela y hacer una compra real de bajo valor en producción.

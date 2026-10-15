@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
+import { PrivacyPage, TermsPage } from "./Legal";
 import { Empty, ErrorState, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
@@ -95,31 +96,7 @@ export function PublicSupportPage() {
 }
 
 export function LegalPage({ kind }: { kind: "terms" | "privacy" }) {
-  const title = kind === "terms" ? "Términos y condiciones" : "Política de privacidad";
-  useDocumentTitle(title);
-  return (
-    <div className="container" style={{ maxWidth: 760 }}>
-      <div className="page-head"><h1 className="page-title">{title}</h1></div>
-      <div className="alert alert-warning" style={{ marginBottom: 24 }}>
-        <Icon name="alert" />
-        <div>Texto de ejemplo. Reemplázalo por los términos revisados por tu asesor legal antes de vender (Estatuto del Consumidor, Ley 1480 de 2011, y protección de datos, Ley 1581 de 2012).</div>
-      </div>
-      {kind === "terms" ? (
-        <div className="prose" style={{ display: "grid", gap: 16 }}>
-          <p>1. NexiStore comercializa productos digitales. Las características, duración y condiciones de cada producto se indican en su página.</p>
-          <p>2. Los precios están en pesos colombianos (COP). El pedido se confirma únicamente cuando la pasarela de pago verifica el pago.</p>
-          <p>3. La entrega se realiza de forma digital en el panel del cliente.</p>
-          <p>4. Derecho de retracto y garantía según la normativa colombiana vigente.</p>
-        </div>
-      ) : (
-        <div className="prose" style={{ display: "grid", gap: 16 }}>
-          <p>Tratamos tus datos (nombre, correo, celular y documento) solo para procesar pedidos, entregar productos y brindarte soporte.</p>
-          <p>Las contraseñas se almacenan con hash (scrypt). No almacenamos datos de tarjetas: los pagos se procesan en la pasarela.</p>
-          <p>Puedes solicitar la actualización o eliminación de tus datos escribiendo a soporte.</p>
-        </div>
-      )}
-    </div>
-  );
+  return kind === "terms" ? <TermsPage /> : <PrivacyPage />;
 }
 
 export function NotFoundPage() {

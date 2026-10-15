@@ -561,11 +561,11 @@ export function AdminSettings() {
     if (s.data) setRate(s.data.crypto.copPerUnit ? String(s.data.crypto.copPerUnit) : "");
   }, [s.data]);
   const campaign = useForm(campaignSchema, { enabled: true, titleLead: "", titleAccent: "", subtitle: "", ctaLabel: "", ctaHref: "/promociones", sealTop: "", sealValue: "", sealBottom: "", promoTitle: "", promoText: "", snow: true, heroImage: "", authImage: "", promoImage: "", heroProducts: true });
-  const store = useForm(storeSettingsSchema, { storeName: "", supportEmail: "", supportWhatsapp: "", manualPaymentInstructions: "" });
+  const store = useForm(storeSettingsSchema, { storeName: "", supportEmail: "", supportWhatsapp: "", manualPaymentInstructions: "", legalName: "", legalId: "", legalAddress: "", legalCity: "" });
   useEffect(() => {
     if (s.data) {
       campaign.setValues({ heroImage: "", authImage: "", promoImage: "", heroProducts: true, ...s.data.campaign } as never);
-      store.setValues(s.data.store as never);
+      store.setValues({ legalName: "", legalId: "", legalAddress: "", legalCity: "", ...s.data.store } as never);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.data]);
@@ -649,6 +649,18 @@ export function AdminSettings() {
             <TextField label="Nombre de la tienda" value={st.storeName} error={store.errors.storeName} onValue={(v) => store.set("storeName", v)} />
             <TextField label="Correo de soporte" type="email" value={st.supportEmail} error={store.errors.supportEmail} onValue={(v) => store.set("supportEmail", v)} />
             <TextField label="WhatsApp de soporte" value={st.supportWhatsapp ?? ""} onValue={(v) => store.set("supportWhatsapp", v)} />
+          </div>
+          <div className="form-sep">
+            <h4>Datos legales</h4>
+            <p className="hint">Aparecen en <a className="text-accent" href="/terminos" target="_blank" rel="noreferrer">Términos y condiciones</a> y en la <a className="text-accent" href="/privacidad" target="_blank" rel="noreferrer">Política de privacidad</a> como responsable de la tienda y del tratamiento de datos (Ley 1581 de 2012).</p>
+          </div>
+          <div className="form-row">
+            <TextField label="Razón social o nombre del titular" value={st.legalName ?? ""} error={store.errors.legalName} onValue={(v) => store.set("legalName", v)} placeholder="Ej.: Entretenimiento Online S.A.S." />
+            <TextField label="NIT o cédula" value={st.legalId ?? ""} error={store.errors.legalId} onValue={(v) => store.set("legalId", v)} placeholder="Ej.: 901.234.567-8" />
+          </div>
+          <div className="form-row">
+            <TextField label="Dirección" value={st.legalAddress ?? ""} error={store.errors.legalAddress} onValue={(v) => store.set("legalAddress", v)} placeholder="Calle 00 # 00-00" />
+            <TextField label="Ciudad" value={st.legalCity ?? ""} error={store.errors.legalCity} onValue={(v) => store.set("legalCity", v)} placeholder="Bogotá D.C." />
           </div>
           <TextArea label="Instrucciones de pago por transferencia" value={st.manualPaymentInstructions ?? ""} onValue={(v) => store.set("manualPaymentInstructions", v)} rows={4} maxLength={2000} hint="Incluye número de cuenta / Nequi / Daviplata y a dónde enviar el comprobante." />
           <div><SubmitButton loading={store.submitting}>Guardar</SubmitButton></div>

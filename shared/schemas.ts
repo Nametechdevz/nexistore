@@ -263,6 +263,11 @@ export const storeSettingsSchema = z.object({
   supportEmail: emailSchema,
   supportWhatsapp: z.string().trim().max(30).default(""),
   manualPaymentInstructions: z.string().trim().max(2000).default(""),
+  /** Datos del responsable que aparecen en Términos y Privacidad. */
+  legalName: z.string().trim().max(120).default(""),
+  legalId: z.string().trim().max(40).default(""),
+  legalAddress: z.string().trim().max(160).default(""),
+  legalCity: z.string().trim().max(80).default(""),
 });
 
 export const ticketReplySchema = z.object({
