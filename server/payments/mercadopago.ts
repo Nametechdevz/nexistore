@@ -5,7 +5,7 @@
  * el webhook solo indica qué pago consultar y se valida con x-signature cuando hay secreto.
  */
 import type { Request } from "express";
-import { config } from "../config.js";
+import { integ, publicUrl } from "../services/integrations.js";
 import { hmacSha256, safeEqual } from "../lib/security.js";
 import { returnUrl, SignatureError, type CheckoutOrder, type PaymentAdapter, type VerifiedPayment } from "./types.js";
 
@@ -40,7 +40,7 @@ async function mpFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
-      authorization: `Bearer ${config.MP_ACCESS_TOKEN}`,
+      authorization: `Bearer ${integ().mpAccessToken}`,
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
@@ -73,11 +73,11 @@ export const mercadoPago: PaymentAdapter = {
   id: "mercadopago",
   label: "Mercado Pago",
   description: "Tarjeta, PSE y efectivo a través de Mercado Pago.",
-  pendingReason: "Pendiente de configuración: falta MP_ACCESS_TOKEN.",
-  isConfigured: () => Boolean(config.MP_ACCESS_TOKEN),
+  pendingReason: "Pendiente de configuración: agrega el access token en Admin → Configuración → Pagos.",
+  isConfigured: () => Boolean(integ().mpAccessToken),
 
   async createCheckout(order: CheckoutOrder) {
-    const back = returnUrl(config.appUrl, order.code, "mercadopago");
+    const back = returnUrl(publicUrl(), order.code, "mercadopago");
     const pref = await mpFetch<{ init_point: string }>("/checkout/preferences", {
       method: "POST",
       headers: { "x-idempotency-key": `pref-${order.code}-${Date.now()}` },
@@ -87,7 +87,7 @@ export const mercadoPago: PaymentAdapter = {
         external_reference: order.code,
         back_urls: { success: back, pending: back, failure: back },
         auto_return: "approved",
-        notification_url: `${config.appUrl}/api/payments/webhooks/mercadopago`,
+        notification_url: `${publicUrl()}/api/payments/webhooks/mercadopago`,
         statement_descriptor: "NEXISTORE",
       }),
     });
@@ -98,9 +98,9 @@ export const mercadoPago: PaymentAdapter = {
     const type = (req.query.type ?? req.body?.type) as string | undefined;
     const dataId = String(req.query["data.id"] ?? req.body?.data?.id ?? "");
     if (type !== "payment" || !dataId) return null;
-    if (config.MP_WEBHOOK_SECRET) {
+    if (integ().mpWebhookSecret) {
       const ok = verifyMercadoPagoSignature({
-        secret: config.MP_WEBHOOK_SECRET,
+        secret: integ().mpWebhookSecret,
         signatureHeader: req.get("x-signature"),
         requestId: req.get("x-request-id"),
         dataId,

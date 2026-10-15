@@ -1,4 +1,4 @@
-import { config } from "../config.js";
+import { publicUrl } from "./integrations.js";
 import { execute, query, queryOne, toBool, toIso } from "../db.js";
 import { sendMail } from "./mailer.js";
 import { DEFAULT_STORE, getSetting } from "./settings.js";
@@ -32,7 +32,7 @@ export async function notify(n: NotifyInput): Promise<boolean> {
       to = (await getSetting("store", DEFAULT_STORE)).supportEmail;
     }
     if (to) {
-      const link = n.link ? `\n\n${config.appUrl}${n.link}` : "";
+      const link = n.link ? `\n\n${publicUrl()}${n.link}` : "";
       // El correo es un aviso adicional: si falla, la notificación en la tienda ya existe.
       sendMail(to, n.title, `${n.body ?? ""}${link}`).catch((err) => console.error("No se pudo enviar el correo de notificación:", err));
     }

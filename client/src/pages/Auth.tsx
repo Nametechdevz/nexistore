@@ -49,7 +49,7 @@ function GoogleButton() {
   const { googleEnabled } = useSession();
   if (!googleEnabled)
     return (
-      <button type="button" className="btn btn-outline btn-block" disabled title="Pendiente de configuración: faltan GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET">
+      <button type="button" className="btn btn-outline btn-block" disabled title="Se activa en Admin → Configuración → Pagos, correo y acceso">
         <GoogleG /> Continuar con Google (pendiente de configuración)
       </button>
     );

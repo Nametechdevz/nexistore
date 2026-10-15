@@ -35,7 +35,7 @@ Requisitos: Node.js 20.12 o superior y MySQL/MariaDB.
 
 ```bash
 npm install
-cp .env.example .env          # ajusta DB_*, APP_URL=http://localhost:5173, NODE_ENV=development
+cp .env.example .env          # ajusta DB_* y añade NODE_ENV=development
 npm run db:migrate            # crea las tablas
 npm run db:seed               # datos de ejemplo (solo si no hay categorías)
 npm run admin:create -- admin@tu-dominio.com "Tu Nombre" 'ClaveSegura123'
@@ -66,17 +66,10 @@ Sirve para los planes de Hostinger con aplicaciones **Node.js** (Business o Clou
    - Versión de Node: **20 o 22**.
    - Comando de build: `npm run build`
    - Comando de inicio / archivo de entrada: `npm start` (equivale a `node dist/node/server/index.js`)
-3. **Variables de entorno:** cópialas de `.env.example` en el panel de la app. Como mínimo:
-   - `NODE_ENV=production`, `APP_URL=https://tu-dominio.com` y `TRUST_PROXY=true`
-   - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` y `DB_NAME`
-   - Correo: `SMTP_HOST=smtp.hostinger.com`, `SMTP_PORT=465`, `SMTP_USER` y `SMTP_PASSWORD` (un buzón de Hostinger)
-   - `INVENTORY_ENCRYPTION_KEY` (obligatoria para el inventario de cuentas; guárdala también fuera del servidor)
-4. **Primer arranque:** el servidor aplica las migraciones pendientes al iniciar (`AUTO_MIGRATE=false` lo desactiva). Para crear el administrador y, si quieres, los datos de ejemplo, usa la terminal SSH del plan:
-   ```bash
-   npm run db:seed
-   npm run admin:create -- tu@correo.com "Tu Nombre" 'ClaveSegura123'
-   ```
-5. **Dominio y SSL:** activa el SSL del dominio. Las cookies de sesión se marcan `Secure` en producción, así que la tienda debe servirse por HTTPS.
+3. **Variables de entorno:** solo la base de datos y el primer administrador: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `ADMIN_EMAIL` y `ADMIN_PASSWORD` (opcional `SEED_DEMO=true` para el catálogo de ejemplo).
+4. **Primer arranque:** el servidor aplica las migraciones, genera la llave de cifrado del inventario (se guarda en la base de datos) y crea el administrador si no existe ninguno.
+5. **Panel:** en *Admin → Configuración → «Pagos, correo y acceso»* se configuran Wompi, Mercado Pago, Zenobank, transferencias, el correo SMTP, Google y la URL de la tienda. Los cambios se aplican al instante y los secretos se muestran enmascarados.
+6. **Dominio y SSL:** activa el SSL del dominio. Las cookies de sesión se marcan `Secure` en producción, así que la tienda debe servirse por HTTPS.
 
 ## Billetera
 
@@ -94,7 +87,7 @@ Cada cliente tiene un saldo en COP con historial completo (recargas, compras, re
 
 En el producto, elige **Entrega: Automática desde inventario**, la **duración del servicio (días)** y el umbral de **alerta de poco stock**.
 
-- **Carga:** en *Admin → Inventario de cuentas → Agregar cuentas*, una por línea, con el formato `credenciales | etiqueta | AAAA-MM-DD`. Las credenciales se guardan **cifradas** con `INVENTORY_ENCRYPTION_KEY`.
+- **Carga:** en *Admin → Inventario de cuentas → Agregar cuentas*, una por línea, con el formato `credenciales | etiqueta | AAAA-MM-DD`. Las credenciales se guardan **cifradas** (AES-256-GCM) con una llave que se genera sola al instalar y queda en la base de datos: haz copias de seguridad de la base.
 - **Ciclo:** disponible → **reservada** (al crear el pedido) → **vendida** (al confirmarse el pago; el pedido pasa a *Completado* solo). Termina en **vencida** o **caída**. Si el pedido se cancela, la cuenta vuelve a disponible.
 - **Stock:** es siempre el número de cuentas disponibles.
 - **Resumen por producto:** disponibles, vendidas, por vencer y caídas. Filtros por estado, por vencimiento en el proveedor y por fin del servicio del cliente.
@@ -125,18 +118,18 @@ Ningún pago se simula. Un pedido pasa a **Pagado** solo de dos formas:
 - **Pasarela:** el servidor recibe una notificación con firma verificada o consulta directamente la API del proveedor, y comprueba que el **monto y la moneda coincidan exactamente** con el pedido. Los eventos son idempotentes.
 - **Transferencia manual:** un administrador confirma haber recibido el dinero. El panel no permite marcar como pagado manualmente un pedido de pasarela.
 
-Mientras falten credenciales, el método aparece como **«Pendiente de configuración»** y no se puede seleccionar.
+Las credenciales se ingresan en *Admin → Configuración → Pagos, correo y acceso*, que también muestra las URL de webhook para copiar. Mientras falten, el método aparece como **«Pendiente de configuración»** y no se puede seleccionar.
 
-| Método | Variables | URL de notificación (webhook) |
+| Método | Datos en el panel | URL de notificación (webhook) |
 |---|---|---|
-| Mercado Pago (Checkout Pro) | `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` | `{APP_URL}/api/payments/webhooks/mercadopago` (evento *Pagos*) |
-| Wompi (Nequi, Bancolombia, PSE, tarjetas) | `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | `{APP_URL}/api/payments/webhooks/wompi` |
-| Transferencia (Nequi/Daviplata/Bancolombia) | `MANUAL_PAYMENTS_ENABLED=true` | Confirmación manual en el panel |
-| Zenobank (cripto: USDT, USDC, BTC…) | `ZENOBANK_API_KEY`, `ZENOBANK_WEBHOOK_SECRET` (+ tasa en *Configuración* si cotizas en USD) | `{APP_URL}/api/payments/webhooks/zenobank` |
+| Mercado Pago (Checkout Pro) | Access token y clave del webhook | `{URL}/api/payments/webhooks/mercadopago` (evento *Pagos*) |
+| Wompi (Nequi, Bancolombia, PSE, tarjetas) | Llave pública, secreto de integridad y de eventos | `{URL}/api/payments/webhooks/wompi` |
+| Transferencia (Nequi/Daviplata/Bancolombia) | Activar «Transferencias» | Confirmación manual en el panel |
+| Zenobank (cripto: USDT, USDC, BTC…) | API key `sk_…`, secreto `whsec_…` y moneda (+ tasa si cotizas en USD) | `{URL}/api/payments/webhooks/zenobank` |
 | Billetera NexiStore | — | Interno: se descuenta del saldo |
 | PayPal | — | **No integrado**: se muestra como «No disponible» |
 
-**Zenobank** se integra como su SDK oficial: `POST /api/v1/checkouts` con la cabecera `X-API-Key`. Cada pedido o recarga se cotiza en `ZENOBANK_PRICE_CURRENCY` (USD por defecto) con la tasa del panel, redondeando hacia arriba a 2 decimales, y la cotización queda guardada. El webhook se verifica con la firma `zeno-signature` (HMAC-SHA256 con el secreto `whsec_` y una tolerancia de 5 minutos). Después se consulta el checkout en la API y solo se confirma si el estado es `COMPLETED` con el monto exacto. Los pagos parciales y los vencidos no se confirman.
+**Zenobank** se integra como su SDK oficial: `POST /api/v1/checkouts` con la cabecera `X-API-Key`. Cada pedido o recarga se cotiza en la moneda configurada (USD por defecto) con la tasa del panel, redondeando hacia arriba a 2 decimales, y la cotización queda guardada. El webhook se verifica con la firma `zeno-signature` (HMAC-SHA256 con el secreto `whsec_` y una tolerancia de 5 minutos). Después se consulta el checkout en la API y solo se confirma si el estado es `COMPLETED` con el monto exacto. Los pagos parciales y los vencidos no se confirman.
 
 Prueba primero con llaves de *sandbox*: las llaves `pub_test_` de Wompi usan su entorno de pruebas automáticamente. Al volver de la pasarela, la página de confirmación consulta el estado al proveedor desde el servidor, así que el pedido se confirma aunque el webhook tarde.
 
@@ -147,16 +140,16 @@ Los pedidos sin pagar se cancelan automáticamente a las 48 horas y liberan el i
 - **Inyección SQL:** todas las consultas usan parámetros, la búsqueda escapa `%` y `_`, y `multipleStatements` está desactivado.
 - **XSS:** React escapa todo el contenido, el blog se renderiza como texto y hay una política CSP estricta con Helmet.
 - **CSRF:** cookie y cabecera de doble envío en cada mutación, verificación de `Origin` y cookies `SameSite=Lax`.
-- **Credenciales del inventario:** cifradas en reposo (AES-256-GCM); solo se muestran al cliente con el pedido completado y al administrador en el detalle de la cuenta.
+- **Credenciales del inventario:** cifradas en reposo (AES-256-GCM) con una llave generada al instalar y guardada en la base de datos (o en `INVENTORY_ENCRYPTION_KEY` si la defines); solo se muestran al cliente con el pedido completado y al administrador en el detalle de la cuenta.
 - **Sesiones:** token aleatorio en cookie `httpOnly`; en la base de datos solo se guarda su hash SHA-256. Las contraseñas usan scrypt con sal.
 - **Acceso:** el rol se comprueba en el servidor (`requireAuth` y `requireAdmin`) y cada cliente solo ve sus propios pedidos.
 - **Abuso:** límite de intentos en login, registro y recuperación. La recuperación no revela si un correo existe y sus enlaces caducan en 1 hora y son de un solo uso.
 - **CSV:** la exportación neutraliza fórmulas (inyección CSV).
-- **Secretos:** solo en variables de entorno. `.env` está en `.gitignore`.
+- **Secretos:** nunca en el código. Las claves de pasarelas y SMTP se guardan en la base de datos y la API del panel nunca las devuelve completas. `.env` está en `.gitignore`.
 
 ## Inicio de sesión con Google (opcional)
 
-Crea credenciales OAuth en Google Cloud con la URI de redirección `{APP_URL}/api/auth/google/callback` y define `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`. Sin ellas, el botón aparece deshabilitado con el aviso «pendiente de configuración».
+Crea credenciales OAuth en Google Cloud con la URI de redirección `{URL}/api/auth/google/callback` (el panel la muestra) y pega el Client ID y el Client secret en *Configuración*. Sin ellas, el botón aparece deshabilitado con el aviso «pendiente de configuración».
 
 ## Pendiente antes de vender
 

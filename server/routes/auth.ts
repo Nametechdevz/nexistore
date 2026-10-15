@@ -7,6 +7,7 @@ import { burnPasswordCheck, hashPassword, randomToken, sha256, verifyPassword } 
 import { createSession, destroySession, CSRF_COOKIE } from "../middleware/session.js";
 import { sendMail } from "../services/mailer.js";
 import { forgotSchema, loginSchema, registerSchema, resetSchema } from "../../shared/schemas.js";
+import { integ, publicUrl } from "../services/integrations.js";
 
 export const authRouter = Router();
 
@@ -24,7 +25,7 @@ authRouter.get(
     res.json({
       user: req.user ?? null,
       csrfToken: req.cookies[CSRF_COOKIE],
-      googleEnabled: Boolean(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET),
+      googleEnabled: Boolean(integ().googleClientId && integ().googleClientSecret),
     });
   }),
 );
@@ -85,7 +86,7 @@ authRouter.post(
         user.id,
         new Date(Date.now() + 60 * 60 * 1000),
       ]);
-      const link = `${config.appUrl}/restablecer/${token}`;
+      const link = `${publicUrl()}/restablecer/${token}`;
       await sendMail(
         email,
         "Restablece tu contraseña de NexiStore",
@@ -126,14 +127,14 @@ const GOOGLE_STATE = "nx_gstate";
 authRouter.get(
   "/google",
   ah(async (req, res) => {
-    if (!config.GOOGLE_CLIENT_ID || !config.GOOGLE_CLIENT_SECRET) {
+    if (!integ().googleClientId || !integ().googleClientSecret) {
       return res.redirect("/ingresar?error=google_no_configurado");
     }
     const state = randomToken(16);
     res.cookie(GOOGLE_STATE, state, { httpOnly: true, secure: config.isProd, sameSite: "lax", maxAge: 10 * 60 * 1000, path: "/" });
     const params = new URLSearchParams({
-      client_id: config.GOOGLE_CLIENT_ID,
-      redirect_uri: `${config.appUrl}/api/auth/google/callback`,
+      client_id: integ().googleClientId,
+      redirect_uri: `${publicUrl()}/api/auth/google/callback`,
       response_type: "code",
       scope: "openid email profile",
       state,
@@ -149,7 +150,7 @@ authRouter.get(
     const { code, state } = req.query;
     const expected = req.cookies[GOOGLE_STATE];
     res.clearCookie(GOOGLE_STATE, { path: "/" });
-    if (!config.GOOGLE_CLIENT_ID || !config.GOOGLE_CLIENT_SECRET) return res.redirect("/ingresar?error=google_no_configurado");
+    if (!integ().googleClientId || !integ().googleClientSecret) return res.redirect("/ingresar?error=google_no_configurado");
     if (typeof code !== "string" || typeof state !== "string" || !expected || state !== expected) {
       return res.redirect("/ingresar?error=google_estado");
     }
@@ -158,9 +159,9 @@ authRouter.get(
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code,
-        client_id: config.GOOGLE_CLIENT_ID,
-        client_secret: config.GOOGLE_CLIENT_SECRET,
-        redirect_uri: `${config.appUrl}/api/auth/google/callback`,
+        client_id: integ().googleClientId,
+        client_secret: integ().googleClientSecret,
+        redirect_uri: `${publicUrl()}/api/auth/google/callback`,
         grant_type: "authorization_code",
       }),
     });

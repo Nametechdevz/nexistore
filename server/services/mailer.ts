@@ -1,15 +1,36 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { config } from "../config.js";
+import { integ } from "./integrations.js";
 
 let transport: Transporter | null = null;
+let transportKey = "";
 
-export const mailConfigured = () => Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASSWORD);
+export const mailConfigured = () => {
+  const c = integ();
+  return Boolean(c.smtpHost && c.smtpUser && c.smtpPassword);
+};
 
 /** Bandeja en memoria para pruebas automatizadas. */
 export const testOutbox: { to: string; subject: string; text: string }[] = [];
 
-export async function sendMail(to: string, subject: string, text: string): Promise<{ delivered: boolean }> {
-  if (config.NODE_ENV === "test") {
+function getTransport(): Transporter {
+  const c = integ();
+  const key = [c.smtpHost, c.smtpPort, c.smtpUser, c.smtpPassword].join("|");
+  // Si el admin cambió la configuración SMTP en el panel, se crea un transporte nuevo.
+  if (!transport || key !== transportKey) {
+    transport = nodemailer.createTransport({
+      host: c.smtpHost,
+      port: c.smtpPort,
+      secure: c.smtpPort === 465,
+      auth: { user: c.smtpUser, pass: c.smtpPassword },
+    });
+    transportKey = key;
+  }
+  return transport;
+}
+
+export async function sendMail(to: string, subject: string, text: string, opts: { force?: boolean } = {}): Promise<{ delivered: boolean }> {
+  if (config.NODE_ENV === "test" && !opts.force) {
     testOutbox.push({ to, subject, text });
     return { delivered: true };
   }
@@ -19,12 +40,14 @@ export async function sendMail(to: string, subject: string, text: string): Promi
     else console.warn(`[correo NO enviado — SMTP pendiente de configuración] ${subject} → ${to}`);
     return { delivered: false };
   }
-  transport ??= nodemailer.createTransport({
-    host: config.SMTP_HOST,
-    port: config.SMTP_PORT,
-    secure: config.SMTP_PORT === 465,
-    auth: { user: config.SMTP_USER, pass: config.SMTP_PASSWORD },
-  });
-  await transport.sendMail({ from: config.SMTP_FROM ?? config.SMTP_USER, to, subject, text });
+  const c = integ();
+  await getTransport().sendMail({ from: c.smtpFrom || c.smtpUser, to, subject, text });
   return { delivered: true };
+}
+
+/** Prueba de conexión y envío real (botón «Enviar correo de prueba» del panel). */
+export async function testMail(to: string): Promise<void> {
+  if (!mailConfigured()) throw new Error("Completa servidor, usuario y contraseña SMTP.");
+  await getTransport().verify();
+  await sendMail(to, "Correo de prueba de NexiStore", "Si recibes este mensaje, el correo SMTP de tu tienda está bien configurado.", { force: true });
 }

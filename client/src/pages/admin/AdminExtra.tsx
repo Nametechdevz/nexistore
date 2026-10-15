@@ -112,7 +112,7 @@ export function AdminInventory() {
       </div>
       {summary.data && !summary.data.vault && (
         <div style={{ marginBottom: 16 }}>
-          <Alert kind="warning">Inventario pendiente de configuración: define <strong>INVENTORY_ENCRYPTION_KEY</strong> en el servidor para guardar credenciales cifradas.</Alert>
+          <Alert kind="warning">La llave de cifrado del inventario no está disponible. Reinicia la aplicación para que se genere automáticamente.</Alert>
         </div>
       )}
       {summary.data && !summary.data.items.length && (

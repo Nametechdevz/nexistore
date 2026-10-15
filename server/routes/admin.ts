@@ -6,11 +6,14 @@ import { requireAdmin } from "../middleware/session.js";
 import { getProductBySlug, listCategories, listProducts } from "../services/catalog.js";
 import { changeStatus, getOrder, listOrders, setDelivery } from "../services/orders.js";
 import { DEFAULT_CAMPAIGN, DEFAULT_CRYPTO, DEFAULT_STORE, getSetting, setSetting } from "../services/settings.js";
+import { detectedUrl, publicUrl, publicView, saveIntegrations } from "../services/integrations.js";
+import { testMail } from "../services/mailer.js";
 import { paymentMethods } from "../payments/index.js";
 import { ORDER_STATUSES } from "../../shared/constants.js";
 import {
   campaignSchema,
   cryptoSettingsSchema,
+  integrationsSchema,
   categoryInputSchema,
   couponInputSchema,
   orderDeliverySchema,
@@ -516,6 +519,46 @@ adminRouter.put(
   ah(async (req, res) => {
     await setSetting("store", parse(storeSettingsSchema, req.body));
     res.json({ ok: true });
+  }),
+);
+
+adminRouter.get(
+  "/settings/integrations",
+  ah(async (_req, res) => {
+    const base = publicUrl();
+    res.json({
+      values: publicView(),
+      detectedUrl: detectedUrl(),
+      publicUrl: base,
+      webhooks: {
+        wompi: `${base}/api/payments/webhooks/wompi`,
+        mercadopago: `${base}/api/payments/webhooks/mercadopago`,
+        zenobank: `${base}/api/payments/webhooks/zenobank`,
+        googleRedirect: `${base}/api/auth/google/callback`,
+      },
+      envOverrides: { encryptionKeyFromEnv: Boolean(process.env.INVENTORY_ENCRYPTION_KEY?.trim()) },
+    });
+  }),
+);
+
+adminRouter.put(
+  "/settings/integrations",
+  ah(async (req, res) => {
+    const d = parse(integrationsSchema, req.body);
+    await saveIntegrations({ ...d, siteUrl: d.siteUrl?.replace(/\/$/, "") });
+    res.json({ ok: true, values: publicView() });
+  }),
+);
+
+adminRouter.post(
+  "/settings/integrations/test-email",
+  ah(async (req, res) => {
+    try {
+      await testMail(req.user!.email);
+    } catch (err) {
+      throw badRequest(`No se pudo enviar: ${err instanceof Error ? err.message : "error desconocido"}`);
+    }
+    res.json({ ok: true, to: req.user!.email });
   }),
 );
 

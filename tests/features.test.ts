@@ -1,7 +1,6 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { config } from "../server/config.js";
 import { execute, queryOne } from "../server/db.js";
 import { verifyZenoSignature, zenoOrderId, zenoToCode } from "../server/payments/zenobank.js";
 import { runAlerts } from "../server/services/notifications.js";
@@ -294,7 +293,7 @@ describe("Zenobank (cripto)", () => {
     const store = (await request(app).get("/api/catalog/store")).body;
     const z = store.paymentMethods.find((m: { id: string }) => m.id === "zenobank");
     expect(z.configured).toBe(false);
-    expect(z.pendingReason).toMatch(/ZENOBANK_API_KEY/);
+    expect(z.pendingReason).toMatch(/Configuración → Pagos/);
     const u = await registered();
     const p = await product("docuplay-anual");
     await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
@@ -305,9 +304,11 @@ describe("Zenobank (cripto)", () => {
     const checkouts = new Map<string, Record<string, string>>();
     let paidAmountOverride: string | null = null;
 
+    let admin: Awaited<ReturnType<typeof adminClient>>;
     beforeAll(async () => {
-      config.ZENOBANK_API_KEY = "sk_test_123";
-      config.ZENOBANK_WEBHOOK_SECRET = SECRET;
+      admin = await adminClient();
+      // Las llaves se configuran desde el panel (no por variables de entorno).
+      await admin.put("/api/admin/settings/integrations").send({ zenoApiKey: "sk_test_123", zenoWebhookSecret: SECRET, zenoCurrency: "USD" }).expect(200);
       vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const url = String(input);
         expect((init?.headers as Record<string, string>)["X-API-Key"]).toBe("sk_test_123");
@@ -327,10 +328,9 @@ describe("Zenobank (cripto)", () => {
       const a = await adminClient();
       await a.put("/api/admin/settings/crypto").send({ copPerUnit: 4000 }).expect(200);
     });
-    afterAll(() => {
+    afterAll(async () => {
       vi.restoreAllMocks();
-      config.ZENOBANK_API_KEY = undefined;
-      config.ZENOBANK_WEBHOOK_SECRET = undefined;
+      await admin.put("/api/admin/settings/integrations").send({ zenoApiKey: "", zenoWebhookSecret: "" }).expect(200);
     });
 
     async function webhook(checkoutId: string, status: string) {
@@ -393,6 +393,44 @@ describe("Zenobank (cripto)", () => {
       expect((await webhook(checkoutId, "COMPLETED")).body.result).toBe("paid");
       expect((await u.get("/api/account/wallet")).body.balance).toBe(40000);
     });
+  });
+});
+
+describe("configuración de integraciones desde el panel", () => {
+  it("guarda llaves, nunca devuelve secretos completos y aplica los cambios al instante", async () => {
+    const a = await adminClient();
+    const u = await registered();
+    expect((await u.get("/api/admin/settings/integrations")).status).toBe(403);
+    expect((await a.put("/api/admin/settings/integrations").send({ wompiPublicKey: "llave-mala" })).status).toBe(422);
+    expect((await a.put("/api/admin/settings/integrations").send({ siteUrl: "tienda.com" })).status).toBe(422);
+
+    await a.put("/api/admin/settings/integrations").send({ mpAccessToken: "APP_USR-secreto-123456", siteUrl: "https://tienda.example.co/" }).expect(200);
+    const view = (await a.get("/api/admin/settings/integrations")).body;
+    expect(view.values.mpAccessToken).toBe("");
+    expect(view.values.mpAccessTokenSet).toBe(true);
+    expect(view.values.mpAccessTokenHint).toBe("••••3456");
+    expect(view.publicUrl).toBe("https://tienda.example.co");
+    expect(view.webhooks.wompi).toBe("https://tienda.example.co/api/payments/webhooks/wompi");
+    expect(JSON.stringify(view)).not.toContain("secreto-123456");
+
+    // Mercado Pago queda disponible sin reiniciar; omitir el campo conserva el secreto.
+    let mp = (await request(app).get("/api/catalog/store")).body.paymentMethods.find((m: { id: string }) => m.id === "mercadopago");
+    expect(mp.configured).toBe(true);
+    await a.put("/api/admin/settings/integrations").send({ smtpHost: "smtp.hostinger.com" }).expect(200);
+    expect((await a.get("/api/admin/settings/integrations")).body.values.mpAccessTokenSet).toBe(true);
+
+    // Desactivar transferencias y borrar el token.
+    await a.put("/api/admin/settings/integrations").send({ manualEnabled: false, mpAccessToken: "", siteUrl: "" }).expect(200);
+    const methods = (await request(app).get("/api/catalog/store")).body.paymentMethods;
+    expect(methods.find((m: { id: string }) => m.id === "manual").configured).toBe(false);
+    mp = methods.find((m: { id: string }) => m.id === "mercadopago");
+    expect(mp.configured).toBe(false);
+    await a.put("/api/admin/settings/integrations").send({ manualEnabled: true }).expect(200);
+
+    // Correo de prueba sin SMTP completo → error claro.
+    const t = await a.post("/api/admin/settings/integrations/test-email");
+    expect(t.status).toBe(400);
+    expect(t.body.error).toMatch(/SMTP/);
   });
 });
 

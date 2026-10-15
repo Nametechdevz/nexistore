@@ -8,6 +8,7 @@ import { useDebounced, useDocumentTitle, useForm, useQuery } from "../../lib/hoo
 import { useSession, useToast } from "../../lib/state";
 import { OrdersTable } from "./AdminCatalog";
 import { CustomerWalletModal } from "./AdminExtra";
+import { IntegrationsSettings } from "./AdminIntegrations";
 import { ORDER_STATUSES, ORDER_TRANSITIONS, type OrderStatus } from "../../../../shared/constants";
 import { campaignSchema, couponInputSchema, postInputSchema, storeSettingsSchema } from "../../../../shared/schemas";
 import type { Order, PaymentMethodInfo } from "../../../../shared/types";
@@ -575,19 +576,8 @@ export function AdminSettings() {
 
   return (
     <>
-      <div className="dash-head"><div><h1 className="dash-title">Configuración</h1><p className="eyebrow">Campaña, tienda y pasarelas de pago.</p></div></div>
-      <div className="panel">
-        <div className="panel-head"><h3>Pasarelas de pago</h3></div>
-        <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>Las credenciales se configuran como variables de entorno en el servidor (nunca en la base de datos ni en el código). Consulta el README.</p>
-        <div className="pay-options">
-          {s.data.paymentMethods.map((m) => (
-            <div key={m.id} className="pay-option" style={{ gridTemplateColumns: "minmax(0,1fr) auto", cursor: "default" }}>
-              <span><strong style={{ display: "block" }}>{m.label}</strong><span className="faint" style={{ fontSize: 13 }}>{m.configured ? "Configurada" : m.pendingReason}</span></span>
-              <span className={`status ${m.configured ? "status-completed" : "status-pending_payment"}`}>{m.configured ? "Activa" : "Pendiente de configuración"}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <div className="dash-head"><div><h1 className="dash-title">Configuración</h1><p className="eyebrow">Pagos, correo, tienda y campaña: todo se ajusta aquí.</p></div></div>
+      <IntegrationsSettings methods={s.data.paymentMethods} onSaved={() => void s.reload()} />
       <div className="panel">
         <div className="panel-head"><h3>Criptomonedas (Zenobank)</h3></div>
         <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>

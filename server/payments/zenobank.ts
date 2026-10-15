@@ -12,11 +12,12 @@
 import type { Request } from "express";
 import { createHmac, randomBytes } from "node:crypto";
 import { config } from "../config.js";
+import { integ, publicUrl } from "../services/integrations.js";
 import { safeEqual } from "../lib/security.js";
 import { returnUrl, SignatureError, type CheckoutOrder, type PaymentAdapter, type VerifiedPayment } from "./types.js";
 
 const API = () => (config.ZENOBANK_API_URL ?? "https://api.zenobank.io").replace(/\/$/, "");
-export const ZENO_CURRENCY = () => (config.ZENOBANK_PRICE_CURRENCY ?? "USD").toUpperCase();
+export const ZENO_CURRENCY = () => (integ().zenoCurrency || "USD").toUpperCase();
 
 /** Verificación de firma idéntica a la del SDK oficial. Devuelve false si algo no cuadra. */
 export function verifyZenoSignature(opts: {
@@ -55,7 +56,7 @@ async function zeno<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API()}${path}`, {
     ...init,
     headers: {
-      "X-API-Key": config.ZENOBANK_API_KEY!,
+      "X-API-Key": integ().zenoApiKey!,
       accept: "application/json",
       ...(init.body ? { "content-type": "application/json" } : {}),
     },
@@ -95,8 +96,8 @@ export const zenobank: PaymentAdapter = {
   id: "zenobank",
   label: "Zenobank · Criptomonedas",
   description: "Paga con USDT, USDC, BTC y otras criptomonedas.",
-  pendingReason: "Pendiente de configuración: faltan ZENOBANK_API_KEY y ZENOBANK_WEBHOOK_SECRET.",
-  isConfigured: () => Boolean(config.ZENOBANK_API_KEY && config.ZENOBANK_WEBHOOK_SECRET),
+  pendingReason: "Pendiente de configuración: agrega la API key y el secreto del webhook en Admin → Configuración → Pagos.",
+  isConfigured: () => Boolean(integ().zenoApiKey && integ().zenoWebhookSecret),
 
   async createCheckout(order: CheckoutOrder) {
     const currency = ZENO_CURRENCY();
@@ -108,7 +109,7 @@ export const zenobank: PaymentAdapter = {
         orderId: zenoOrderId(order.code),
         priceAmount: amount,
         priceCurrency: currency,
-        successRedirectUrl: returnUrl(config.appUrl, order.code, "zenobank"),
+        successRedirectUrl: returnUrl(publicUrl(), order.code, "zenobank"),
       }),
     });
     return { type: "redirect", url: c.checkoutUrl, externalRef: c.id };
@@ -117,7 +118,7 @@ export const zenobank: PaymentAdapter = {
   async handleWebhook(req: Request) {
     const raw = (req as Request & { rawBody?: Buffer }).rawBody?.toString("utf8") ?? "";
     const ok = verifyZenoSignature({
-      secret: config.ZENOBANK_WEBHOOK_SECRET!,
+      secret: integ().zenoWebhookSecret!,
       id: header(req, "id"),
       timestamp: header(req, "timestamp"),
       signature: header(req, "signature"),

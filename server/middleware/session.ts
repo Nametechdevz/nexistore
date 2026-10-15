@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { config } from "../config.js";
+import { publicUrl } from "../services/integrations.js";
 import { execute, queryOne } from "../db.js";
 import { forbidden, HttpError, unauthorized } from "../lib/http.js";
 import { randomToken, safeEqual, sha256 } from "../lib/security.js";
@@ -129,7 +130,7 @@ export function verifyCsrf(req: Request, _res: Response, next: NextFunction) {
   }
   // Defensa adicional: si el navegador envía Origin, debe ser el de la app.
   const origin = req.get("origin");
-  if (origin && origin !== config.appUrl && origin !== `${req.protocol}://${req.get("host")}`) {
+  if (origin && origin !== publicUrl() && origin !== `${req.protocol}://${req.get("host")}`) {
     return next(new HttpError(403, "Origen no permitido.", undefined, "origin"));
   }
   next();

@@ -7,6 +7,8 @@ import { expireStaleOrders } from "./services/orders.js";
 import { queryOne } from "./db.js";
 import { hashPassword } from "./lib/security.js";
 import { seedCatalog } from "./seed.js";
+import { loadIntegrations } from "./services/integrations.js";
+import { ensureVaultKey } from "./services/vault-key.js";
 import { emailSchema, passwordSchema } from "../shared/schemas.js";
 
 /**
@@ -44,6 +46,9 @@ async function bootstrap() {
 async function main() {
   // Aplica migraciones pendientes al arrancar (idempotente). Útil en Hostinger, donde no hay consola fácil.
   if (process.env.AUTO_MIGRATE !== "false") await migrate();
+  const vault = await ensureVaultKey();
+  if (vault === "generated") console.log("✔ Llave de cifrado del inventario generada y guardada.");
+  await loadIntegrations();
   await bootstrap();
 
   const app = createApp();

@@ -27,63 +27,49 @@ En **hPanel → Sitios web → Agregar sitio web → Aplicación Node.js** (o *N
    - **Archivo de entrada:** `dist/node/server/index.js` (o comando de inicio `npm start`)
 3. Antes de desplegar, agrega las **variables de entorno** del paso 3.
 
-## 3. Variables de entorno
+## 3. Variables de entorno (solo base de datos y administrador)
 
-Configúralas en la sección de variables de entorno de la app Node.js en hPanel. `.env.example` trae la lista completa comentada.
-
-**Obligatorias**
+En la sección de variables de entorno de la app Node.js en hPanel agrega **únicamente** estas:
 
 | Variable | Valor |
 |---|---|
-| `NODE_ENV` | `production` |
-| `APP_URL` | `https://tu-dominio.com` (sin barra final) |
-| `TRUST_PROXY` | `true` |
 | `DB_HOST` | `localhost` (o el host que indique hPanel) |
 | `DB_PORT` | `3306` |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Los del paso 1 |
-| `INVENTORY_ENCRYPTION_KEY` | Una llave de 64 caracteres hexadecimales (ver abajo). **Guárdala también fuera del servidor**: sin ella no se pueden leer las cuentas del inventario |
 | `ADMIN_EMAIL` | Tu correo de administrador |
 | `ADMIN_PASSWORD` | Una contraseña de 8+ caracteres con letras y números |
+| `SEED_DEMO` *(opcional)* | `true` para cargar el catálogo de ejemplo si la base está vacía |
 
-Para generar la llave puedes usar cualquier computador con Node.js:
+Si el panel trae otras variables vacías puedes dejarlas así: se ignoran.
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-O usa un generador de "hex 32 bytes" de confianza.
-
-> `ADMIN_EMAIL` y `ADMIN_PASSWORD` crean el **primer administrador** al arrancar, solo si todavía no hay ninguno. Después de iniciar sesión, borra `ADMIN_PASSWORD` de las variables.
-
-**Opcionales** (sin ellas, el método correspondiente aparece como «pendiente de configuración»)
-
-| Variable | Para qué |
-|---|---|
-| `SEED_DEMO=true` | Carga el catálogo de ejemplo si la base está vacía (útil para probar; quítala después) |
-| `SMTP_HOST=smtp.hostinger.com`, `SMTP_PORT=465`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Correos: recuperar contraseña y alertas |
-| `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | Nequi, Bancolombia, PSE y tarjetas |
-| `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` | Mercado Pago |
-| `ZENOBANK_API_KEY`, `ZENOBANK_WEBHOOK_SECRET`, `ZENOBANK_PRICE_CURRENCY=USD` | Criptomonedas |
-| `MANUAL_PAYMENTS_ENABLED=true` | Pagos por transferencia confirmados por el admin |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Iniciar sesión con Google |
+> `ADMIN_EMAIL` y `ADMIN_PASSWORD` crean el **primer administrador** al arrancar, solo si todavía no hay ninguno. Después de entrar, cambia la contraseña desde *Mi cuenta* y borra `ADMIN_PASSWORD` de las variables.
 
 ## 4. Despliega y comprueba
 
-1. Despliega y abre `https://tu-dominio.com/api/health`: debe responder `{"ok":true}`.
-2. Entra a `https://tu-dominio.com/ingresar` con `ADMIN_EMAIL` y `ADMIN_PASSWORD`, y después ve a `/admin`.
-3. Activa el **SSL** del dominio en hPanel. La tienda debe servirse por HTTPS porque las cookies de sesión son seguras.
+1. Activa el **SSL** del dominio en hPanel. La tienda debe servirse por HTTPS porque las cookies de sesión son seguras.
+2. Despliega y abre `https://tu-dominio.com/api/health`: debe responder `{"ok":true}`.
+3. Entra a `https://tu-dominio.com/ingresar` con tu correo y contraseña de administrador, y luego ve a `/admin`.
 
-## 5. Configura las pasarelas (webhooks)
+## 5. Configura todo desde el panel
 
-En el panel de cada proveedor registra estas URL:
+Ve a **Admin → Configuración → «Pagos, correo y acceso»**. Ahí configuras todo, sin tocar el servidor:
 
-| Pasarela | URL |
-|---|---|
-| Wompi (eventos) | `https://tu-dominio.com/api/payments/webhooks/wompi` |
-| Mercado Pago (pagos) | `https://tu-dominio.com/api/payments/webhooks/mercadopago` |
-| Zenobank (checkout.completed / expired / partially_paid) | `https://tu-dominio.com/api/payments/webhooks/zenobank` |
+| Sección | Qué pones | Dónde lo consigues |
+|---|---|---|
+| **Wompi** (Nequi, Bancolombia, PSE, tarjetas) | Llave pública, secreto de integridad y secreto de eventos | Dashboard de Wompi → Desarrolladores |
+| **Mercado Pago** | Access token y clave del webhook | Mercado Pago → Tus integraciones → Credenciales |
+| **Zenobank** (cripto) | API key `sk_…`, secreto del webhook `whsec_…` y moneda | Dashboard de Zenobank → Developers |
+| **Transferencias** | Activar o desactivar | — |
+| **Correo (SMTP)** | `smtp.hostinger.com`, puerto `465`, buzón y contraseña | hPanel → Correos. Usa «Enviar correo de prueba» para verificarlo |
+| **Google** (opcional) | Client ID y Client secret | Google Cloud → Credenciales |
+| **Dirección de la tienda** | `https://tu-dominio.com` | Si la dejas vacía se usa la dirección con la que entras |
+
+Cada sección te muestra la **URL del webhook** lista para copiar y pegar en el panel del proveedor. Los cambios se aplican al instante, sin reiniciar.
+Las claves secretas nunca se vuelven a mostrar completas: solo verás «Guardado ••••1234».
 
 Si cobras con Zenobank en USD, define la tasa en **Admin → Configuración → Criptomonedas**.
+
+**Llave de cifrado del inventario:** se genera sola la primera vez y se guarda en la base de datos. Haz **copias de seguridad de la base de datos** (hPanel → Bases de datos → Copias de seguridad): sin ellas no se pueden recuperar las cuentas del inventario.
 
 ## 6. Primeros pasos en el panel
 
@@ -99,5 +85,6 @@ Sube el nuevo ZIP sobre la misma app y vuelve a desplegar. Las migraciones nueva
 
 - **La app no arranca:** revisa los registros (logs) de la app en hPanel. «Variables de entorno inválidas» indica cuál falta o está mal escrita.
 - **Error de base de datos:** verifica `DB_HOST`, `DB_USER`, `DB_PASSWORD` y `DB_NAME`, y que el usuario tenga permisos sobre la base.
-- **No inicia sesión o el formulario «expira»:** confirma que `APP_URL` coincide exactamente con tu dominio (https) y que `TRUST_PROXY=true`.
-- **«Inventario pendiente de configuración»:** falta `INVENTORY_ENCRYPTION_KEY`.
+- **No inicia sesión o el formulario «expira»:** entra siempre por `https://` y revisa en *Configuración → Dirección de la tienda* que la URL sea exactamente tu dominio (o déjala vacía).
+- **Un método de pago aparece «pendiente de configuración»:** completa sus claves en *Configuración → Pagos, correo y acceso*.
+- **No llegan los correos:** usa «Enviar correo de prueba» en la sección Correo (SMTP); el mensaje de error indica qué falla.

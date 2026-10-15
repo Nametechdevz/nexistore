@@ -1,4 +1,4 @@
-import { config } from "../config.js";
+import { integ } from "../services/integrations.js";
 import { DEFAULT_CRYPTO, DEFAULT_STORE, getSetting } from "../services/settings.js";
 import { ZENO_CURRENCY, zenobank } from "./zenobank.js";
 import { mercadoPago } from "./mercadopago.js";
@@ -15,8 +15,8 @@ const manual: PaymentAdapter = {
   id: "manual",
   label: "Transferencia (Nequi, Daviplata, Bancolombia)",
   description: "Transfiere y envía el comprobante. Confirmamos tu pago manualmente.",
-  pendingReason: "Desactivado: define MANUAL_PAYMENTS_ENABLED=true para habilitarlo.",
-  isConfigured: () => Boolean(config.MANUAL_PAYMENTS_ENABLED),
+  pendingReason: "Desactivado: actívalo en Admin → Configuración → Pagos.",
+  isConfigured: () => integ().manualEnabled,
   async createCheckout() {
     const store = await getSetting("store", DEFAULT_STORE);
     return { type: "instructions", text: store.manualPaymentInstructions };

@@ -15,10 +15,13 @@ const bool = z
   .transform((v) => v === "1" || v === "true");
 
 const schema = z.object({
-  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  // Compilado (dist/) = producción por defecto: en el hosting no hace falta definirlo.
+  NODE_ENV: z.enum(["development", "production", "test"]).default(/[\\/]dist[\\/]/.test(process.argv[1] ?? "") ? "production" : "development"),
   PORT: z.coerce.number().int().default(3000),
-  APP_URL: z.string().url().default("http://localhost:5173"),
-  TRUST_PROXY: bool,
+  /** Opcional: la URL pública también se configura en el panel o se detecta sola. */
+  APP_URL: z.string().url().optional(),
+  /** Por defecto true en producción (Hostinger y la mayoría de hostings usan proxy). */
+  TRUST_PROXY: z.enum(["true", "false", "1", "0"]).optional(),
 
   DB_HOST: z.string().default("127.0.0.1"),
   DB_PORT: z.coerce.number().int().default(3306),
@@ -68,7 +71,7 @@ if (!parsed.success) {
 export const config = {
   ...parsed.data,
   isProd: parsed.data.NODE_ENV === "production",
-  appUrl: parsed.data.APP_URL.replace(/\/$/, ""),
+  trustProxy: parsed.data.TRUST_PROXY ? ["true", "1"].includes(parsed.data.TRUST_PROXY) : parsed.data.NODE_ENV === "production",
 };
 
 export type AppConfig = typeof config;

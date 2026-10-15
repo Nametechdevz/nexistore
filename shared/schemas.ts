@@ -265,6 +265,39 @@ export type CouponInput = z.infer<typeof couponInputSchema>;
 export type CampaignSettings = z.infer<typeof campaignSchema>;
 export type StoreSettings = z.infer<typeof storeSettingsSchema>;
 
+/* ---------- Integraciones (configuradas desde el panel) ---------- */
+
+const optSecret = z.string().trim().max(500).optional(); // undefined = conservar, "" = borrar
+export const integrationsSchema = z.object({
+  siteUrl: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((v) => v === "" || /^https?:\/\/[^\s/]+$/.test(v.replace(/\/$/, "")), "Usa el formato https://tu-dominio.com")
+    .optional(),
+  smtpHost: z.string().trim().max(200).optional(),
+  smtpPort: z.number().int().min(1).max(65535).optional(),
+  smtpUser: z.string().trim().max(200).optional(),
+  smtpPassword: optSecret,
+  smtpFrom: z.string().trim().max(200).optional(),
+  wompiPublicKey: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((v) => v === "" || /^pub_(test|prod)_/.test(v), "La llave pública empieza por pub_test_ o pub_prod_.")
+    .optional(),
+  wompiIntegritySecret: optSecret,
+  wompiEventsSecret: optSecret,
+  mpAccessToken: optSecret,
+  mpWebhookSecret: optSecret,
+  zenoApiKey: optSecret,
+  zenoWebhookSecret: optSecret,
+  zenoCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3,5}$/, "Moneda de 3 a 5 letras, ej. USD.").optional(),
+  manualEnabled: z.boolean().optional(),
+  googleClientId: z.string().trim().max(300).optional(),
+  googleClientSecret: optSecret,
+});
+
 /* ---------- Billetera ---------- */
 
 export const topupSchema = z.object({

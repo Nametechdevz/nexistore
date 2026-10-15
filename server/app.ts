@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { config } from "./config.js";
 import { HttpError } from "./lib/http.js";
 import { appRoot } from "./lib/paths.js";
+import { rememberOrigin } from "./services/integrations.js";
 import { ensureCsrf, loadSession, parseCookies, verifyCsrf } from "./middleware/session.js";
 import { accountRouter } from "./routes/account.js";
 import { adminRouter } from "./routes/admin.js";
@@ -17,7 +18,13 @@ import { shopRouter } from "./routes/shop.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
-  if (config.TRUST_PROXY) app.set("trust proxy", 1);
+  if (config.trustProxy) app.set("trust proxy", 1);
+  // Recuerda la URL con la que entran los visitantes (para enlaces de correos y pasarelas).
+  app.use((req, _res, next) => {
+    const host = req.get("host");
+    if (host && !req.path.startsWith("/api/payments/")) rememberOrigin(`${req.protocol}://${host}`);
+    next();
+  });
 
   app.use(
     helmet({
