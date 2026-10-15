@@ -140,6 +140,7 @@
 }
 .form-row {
   display: grid;
+  align-items: start;
   gap: var(--s-4);
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }

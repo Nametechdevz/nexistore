@@ -4,7 +4,7 @@ import { z } from "zod";
 import { execute, query, queryOne, transaction } from "../db.js";
 import { ah, badRequest, conflict, HttpError, notFound, parse } from "../lib/http.js";
 import { requireAuth } from "../middleware/session.js";
-import { adapters, cryptoRate, isProviderReady, toUsdt } from "../payments/index.js";
+import { adapters, foreignQuoteFor, isProviderReady } from "../payments/index.js";
 import { applyVerifiedPayment, changeStatus, createOrder, getOrder, listOrders, quoteCart } from "../services/orders.js";
 import { ORDER_FILTERS, type OrderFilter } from "../../shared/constants.js";
 import { cartLineSchema, cartSyncSchema, checkoutSchema, couponCodeSchema, reportIssueSchema, reviewSchema } from "../../shared/schemas.js";
@@ -84,9 +84,8 @@ shopRouter.post(
     }
     const lines = await readCart(req.user!.id);
     if (!lines.length) throw badRequest("Tu carrito está vacío.");
-    const rate = input.paymentProvider === "binance" ? await cryptoRate() : null;
     const order = await createOrder(req.user!.id, lines, { ...input, couponCode: input.couponCode || undefined }, {
-      quoteForeign: rate ? (total) => ({ currency: "USDT", amount: toUsdt(total, rate) }) : undefined,
+      quoteForeign: await foreignQuoteFor(input.paymentProvider),
     });
     if (input.paymentProvider !== req.user!.preferredPayment) {
       await execute("UPDATE users SET preferred_payment = ? WHERE id = ?", [input.paymentProvider, req.user!.id]);
@@ -109,6 +108,9 @@ shopRouter.post(
       console.error("Error creando checkout:", err);
       // El pedido existe y queda pendiente: el cliente puede reintentar el pago desde "Mis pedidos".
       return res.status(201).json({ code: order.code, action: null, warning: "No pudimos conectar con la pasarela. Intenta pagar de nuevo desde tu pedido." });
+    }
+    if (action.type === "redirect" && action.externalRef) {
+      await execute("UPDATE orders SET payment_ref = ? WHERE code = ?", [action.externalRef, order.code]);
     }
     res.status(201).json({ code: order.code, action, status: order.status });
   }),
@@ -183,6 +185,9 @@ shopRouter.post(
       console.error(err);
       throw new HttpError(502, "No pudimos conectar con la pasarela de pago. Inténtalo más tarde.");
     });
+    if (action.type === "redirect" && action.externalRef) {
+      await execute("UPDATE orders SET payment_ref = ? WHERE code = ?", [action.externalRef, order.code]);
+    }
     res.json({ action });
   }),
 );
@@ -198,7 +203,7 @@ shopRouter.post(
     if (order.status === "pending_payment" && adapter?.isConfigured() && adapter.verify) {
       const params = z.record(z.string(), z.string().max(100)).catch({}).parse(req.body?.params ?? {});
       try {
-        const verified = await adapter.verify(order.code, params);
+        const verified = await adapter.verify(order.code, params, order.paymentRef);
         if (verified && verified.orderCode === order.code) result = await applyVerifiedPayment(verified);
         else result = "not_found";
       } catch (err) {

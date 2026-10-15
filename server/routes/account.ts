@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword } from "../lib/security.js";
 import { requireAuth } from "../middleware/session.js";
 import { PAYMENT_PROVIDERS } from "../../shared/constants.js";
 import { addressSchema, changePasswordSchema, profileSchema, ticketMessageSchema, ticketSchema, topupSchema } from "../../shared/schemas.js";
-import { adapters, cryptoRate, isProviderReady, toUsdt } from "../payments/index.js";
+import { adapters, foreignQuoteFor, isProviderReady } from "../payments/index.js";
 import { listNotifications, markRead, notify } from "../services/notifications.js";
 import { applyVerifiedPayment } from "../services/orders.js";
 import { addMessage, createTicket, getTicket, listTickets } from "../services/support.js";
@@ -245,8 +245,8 @@ accountRouter.post(
     if (!ready.ok) throw new HttpError(422, `${adapter.label} no está disponible.`, { provider: ready.reason ?? "" });
     const pending = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM wallet_topups WHERE user_id = ? AND status = 'pending'", [req.user!.id]);
     if (Number(pending?.n) >= 3) throw new HttpError(429, "Tienes 3 recargas pendientes. Complétalas o espera a que venzan.");
-    const rate = data.provider === "binance" ? await cryptoRate() : null;
-    const foreign = rate ? { currency: "USDT", amount: toUsdt(data.amount, rate) } : null;
+    const quote = await foreignQuoteFor(data.provider);
+    const foreign = quote ? quote(data.amount) : null;
     const code = newTopupCode();
     await execute(
       "INSERT INTO wallet_topups (code, user_id, amount, provider, payment_currency, payment_amount_foreign) VALUES (?, ?, ?, ?, ?, ?)",
@@ -270,6 +270,9 @@ accountRouter.post(
       await execute("UPDATE wallet_topups SET status = 'cancelled' WHERE code = ?", [code]);
       throw new HttpError(502, "No pudimos conectar con la pasarela de pago. Inténtalo más tarde.");
     }
+    if (action.type === "redirect" && action.externalRef) {
+      await execute("UPDATE wallet_topups SET payment_ref = ? WHERE code = ?", [action.externalRef, code]);
+    }
     if (data.provider === "manual") {
       await notify({ audience: "admin", kind: "topup", title: `Recarga por transferencia pendiente: ${code}`, body: `${u.name} · ${data.amount} COP`, link: "/admin/billetera" });
     }
@@ -281,7 +284,7 @@ accountRouter.post(
 accountRouter.post(
   "/wallet/topups/:code/verify",
   ah(async (req, res) => {
-    const t = await queryOne<{ code: string; provider: string; status: string }>("SELECT code, provider, status FROM wallet_topups WHERE code = ? AND user_id = ?", [
+    const t = await queryOne<{ code: string; provider: string; status: string; payment_ref: string | null }>("SELECT code, provider, status, payment_ref FROM wallet_topups WHERE code = ? AND user_id = ?", [
       String(req.params.code),
       req.user!.id,
     ]);
@@ -291,7 +294,7 @@ accountRouter.post(
     if (t.status === "pending" && adapter?.verify && adapter.isConfigured()) {
       const params = z.record(z.string(), z.string().max(100)).catch({}).parse(req.body?.params ?? {});
       try {
-        const v = await adapter.verify(t.code, params);
+        const v = await adapter.verify(t.code, params, t.payment_ref);
         result = v && v.orderCode === t.code ? await applyVerifiedPayment(v) : "not_found";
       } catch (err) {
         console.error("Error verificando recarga:", err);

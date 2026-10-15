@@ -82,12 +82,13 @@ Sirve para los planes de Hostinger con aplicaciones **Node.js** (Business o Clou
 
 Cada cliente tiene un saldo en COP con historial completo (recargas, compras, reembolsos y ajustes).
 
-- **Recargar:** con Wompi, Mercado Pago, Binance Pay o transferencia. Las recargas por pasarela se acreditan solas con la confirmación verificada del proveedor. Las de transferencia las confirma un administrador en *Admin → Billetera*.
+- **Recargar:** con Wompi, Mercado Pago, Zenobank (cripto) o transferencia. Las recargas por pasarela se acreditan solas con la confirmación verificada del proveedor. Las de transferencia las confirma un administrador en *Admin → Billetera*.
 - **Pagar con saldo:** el pedido queda pagado al instante. El débito y la confirmación ocurren en la misma transacción, con bloqueo de fila, así que el saldo nunca queda negativo.
 - **Reembolsos:**
   - Desde un pedido: cambia el estado a *Reembolsado* y marca «Reembolsar a la billetera».
   - Desde un reporte de cuenta caída: el monto sugerido es proporcional a los días de servicio restantes.
-- **Ajustes manuales:** desde *Admin → Clientes → Billetera*, con motivo obligatorio. Quedan auditados con el administrador que los hizo.
+- **Recargas manuales desde el panel:** en *Admin → Billetera → Recarga manual* (o *Clientes → Billetera*) buscas al cliente, indicas el monto, cómo recibiste el dinero (Nequi, Daviplata, Bancolombia, efectivo, cripto u otro) y el número de comprobante. El saldo se acredita al instante, el cliente recibe una notificación y el mismo comprobante no se puede usar dos veces.
+- **Ajustes:** para corregir un saldo (crédito o débito) con motivo obligatorio. Quedan auditados con el administrador que los hizo.
 
 ## Inventario de cuentas y entrega automática
 
@@ -131,11 +132,11 @@ Mientras falten credenciales, el método aparece como **«Pendiente de configura
 | Mercado Pago (Checkout Pro) | `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` | `{APP_URL}/api/payments/webhooks/mercadopago` (evento *Pagos*) |
 | Wompi (Nequi, Bancolombia, PSE, tarjetas) | `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | `{APP_URL}/api/payments/webhooks/wompi` |
 | Transferencia (Nequi/Daviplata/Bancolombia) | `MANUAL_PAYMENTS_ENABLED=true` | Confirmación manual en el panel |
-| Binance Pay (cripto, USDT) | `BINANCE_PAY_API_KEY`, `BINANCE_PAY_SECRET_KEY` + tasa COP/USDT en *Configuración* | `{APP_URL}/api/payments/webhooks/binance` |
+| Zenobank (cripto: USDT, USDC, BTC…) | `ZENOBANK_API_KEY`, `ZENOBANK_WEBHOOK_SECRET` (+ tasa en *Configuración* si cotizas en USD) | `{APP_URL}/api/payments/webhooks/zenobank` |
 | Billetera NexiStore | — | Interno: se descuenta del saldo |
 | PayPal | — | **No integrado**: se muestra como «No disponible» |
 
-**Binance Pay** no cobra en pesos. Cada pedido o recarga se cotiza en USDT con la tasa del panel, redondeando hacia arriba a 2 decimales, y la cotización se guarda. El pago solo se confirma si Binance reporta exactamente ese monto en USDT. La firma del webhook (RSA) se verifica con el certificado público de Binance y el estado se vuelve a consultar en su API.
+**Zenobank** se integra como su SDK oficial: `POST /api/v1/checkouts` con la cabecera `X-API-Key`. Cada pedido o recarga se cotiza en `ZENOBANK_PRICE_CURRENCY` (USD por defecto) con la tasa del panel, redondeando hacia arriba a 2 decimales, y la cotización queda guardada. El webhook se verifica con la firma `zeno-signature` (HMAC-SHA256 con el secreto `whsec_` y una tolerancia de 5 minutos). Después se consulta el checkout en la API y solo se confirma si el estado es `COMPLETED` con el monto exacto. Los pagos parciales y los vencidos no se confirman.
 
 Prueba primero con llaves de *sandbox*: las llaves `pub_test_` de Wompi usan su entorno de pruebas automáticamente. Al volver de la pasarela, la página de confirmación consulta el estado al proveedor desde el servidor, así que el pedido se confirma aunque el webhook tarde.
 

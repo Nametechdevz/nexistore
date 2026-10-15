@@ -40,9 +40,9 @@ export const ORDER_FILTERS = {
 } as const satisfies Record<string, readonly OrderStatus[] | null>;
 export type OrderFilter = keyof typeof ORDER_FILTERS;
 
-export const PAYMENT_PROVIDERS = ["wompi", "mercadopago", "binance", "manual", "wallet"] as const;
+export const PAYMENT_PROVIDERS = ["wompi", "mercadopago", "zenobank", "manual", "wallet"] as const;
 /** Pasarelas con las que se puede recargar la billetera (no se recarga billetera con billetera). */
-export const TOPUP_PROVIDERS = ["wompi", "mercadopago", "binance", "manual"] as const;
+export const TOPUP_PROVIDERS = ["wompi", "mercadopago", "zenobank", "manual"] as const;
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
 
 export const CART_MAX_QTY = 10;

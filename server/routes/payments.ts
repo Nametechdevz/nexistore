@@ -18,8 +18,6 @@ paymentsRouter.post(
     try {
       const verified = await adapter.handleWebhook(req);
       const result = verified ? await applyVerifiedPayment(verified) : "ignored";
-      // Binance Pay exige esta respuesta exacta para no reintentar.
-      if (provider === "binance") return res.status(200).json({ returnCode: "SUCCESS", returnMessage: null });
       return res.status(200).json({ ok: true, result });
     } catch (err) {
       if (err instanceof SignatureError) {

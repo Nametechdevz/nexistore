@@ -38,7 +38,7 @@ export async function walletSummary(userId: number) {
     [userId],
   );
   const topups = await query<Record<string, unknown>>(
-    "SELECT code, amount, provider, status, payment_currency, payment_amount_foreign, created_at, paid_at FROM wallet_topups WHERE user_id = ? ORDER BY id DESC LIMIT 20",
+    "SELECT code, amount, provider, status, payment_currency, payment_amount_foreign, payment_ref, created_at, paid_at FROM wallet_topups WHERE user_id = ? ORDER BY id DESC LIMIT 20",
     [userId],
   );
   return {
@@ -63,6 +63,7 @@ export const mapTopup = (t: Record<string, unknown>) => ({
   status: t.status as string,
   paymentCurrency: (t.payment_currency as string | null) ?? null,
   paymentAmountForeign: t.payment_amount_foreign ? String(Number(t.payment_amount_foreign)) : null,
+  paymentRef: (t.payment_ref as string | null) ?? null,
   createdAt: toIso(t.created_at),
   paidAt: toIso(t.paid_at),
   customer: t.email ? { id: t.user_id, name: t.name, email: t.email } : undefined,

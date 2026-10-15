@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { DEFAULT_CRYPTO, DEFAULT_STORE, getSetting } from "../services/settings.js";
-import { binance } from "./binance.js";
+import { ZENO_CURRENCY, zenobank } from "./zenobank.js";
 import { mercadoPago } from "./mercadopago.js";
 import type { PaymentAdapter } from "./types.js";
 import { wompi } from "./wompi.js";
@@ -38,24 +38,34 @@ const wallet: PaymentAdapter = {
 export const adapters: Record<PaymentProvider, PaymentAdapter> = {
   wompi,
   mercadopago: mercadoPago,
-  binance,
+  zenobank,
   manual,
   wallet,
 };
 
-/** Tasa COP por USDT configurada por el administrador (null si falta). */
+/** Tasa COP por unidad de la moneda de cotización cripto (null si falta o si se cotiza en COP). */
 export async function cryptoRate(): Promise<number | null> {
   const c = await getSetting("crypto", DEFAULT_CRYPTO);
-  return c.copPerUsdt && c.copPerUsdt > 0 ? c.copPerUsdt : null;
+  return c.copPerUnit && c.copPerUnit > 0 ? c.copPerUnit : null;
 }
 
-/** USDT a cobrar: redondeado hacia arriba a 2 decimales para no cobrar de menos. */
-export const toUsdt = (cop: number, rate: number) => (Math.ceil((cop / rate) * 100) / 100).toFixed(2);
+/** Monto a cobrar en moneda extranjera: redondeado hacia arriba a 2 decimales para no cobrar de menos. */
+export const toForeign = (cop: number, rate: number) => (Math.ceil((cop / rate) * 100) / 100).toFixed(2);
+
+/** Cotización que se guarda en el pedido o recarga (null si no aplica). */
+export async function foreignQuoteFor(provider: PaymentProvider): Promise<((totalCop: number) => { currency: string; amount: string }) | undefined> {
+  if (provider !== "zenobank" || ZENO_CURRENCY() === "COP") return undefined;
+  const rate = await cryptoRate();
+  if (!rate) return undefined;
+  return (total) => ({ currency: ZENO_CURRENCY(), amount: toForeign(total, rate) });
+}
 
 export async function isProviderReady(id: PaymentProvider): Promise<{ ok: boolean; reason?: string }> {
   const a = adapters[id];
   if (!a.isConfigured()) return { ok: false, reason: a.pendingReason };
-  if (id === "binance" && !(await cryptoRate())) return { ok: false, reason: "Pendiente de configuración: define la tasa COP/USDT en Configuración." };
+  if (id === "zenobank" && ZENO_CURRENCY() !== "COP" && !(await cryptoRate())) {
+    return { ok: false, reason: `Pendiente de configuración: define la tasa COP/${ZENO_CURRENCY()} en Configuración.` };
+  }
   return { ok: true };
 }
 
@@ -70,7 +80,7 @@ export async function paymentMethods(): Promise<PaymentMethodInfo[]> {
         description: a.description,
         configured: ready.ok,
         pendingReason: ready.ok ? undefined : ready.reason,
-        ...(a.id === "binance" ? { currency: "USDT", rate } : {}),
+        ...(a.id === "zenobank" ? { currency: ZENO_CURRENCY(), rate: ZENO_CURRENCY() === "COP" ? null : rate } : {}),
       };
     }),
   );

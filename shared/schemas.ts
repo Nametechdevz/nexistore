@@ -276,13 +276,35 @@ export const topupSchema = z.object({
   provider: z.enum(TOPUP_PROVIDERS, { error: "Selecciona un método de pago." }),
 });
 
+export const MANUAL_TOPUP_METHODS = {
+  nequi: "Nequi",
+  daviplata: "Daviplata",
+  bancolombia: "Bancolombia",
+  efectivo: "Efectivo",
+  cripto: "Cripto",
+  otro: "Otro",
+} as const;
+
+/** Recarga manual hecha por un administrador (dinero recibido por fuera de la tienda). */
+export const adminTopupSchema = z.object({
+  userId: z.number({ error: "Selecciona un cliente." }).int().positive("Selecciona un cliente."),
+  amount: z
+    .number({ error: "Ingresa un monto." })
+    .int("Usa pesos sin decimales.")
+    .min(1000, "El monto mínimo es $1.000.")
+    .max(WALLET_MAX_TOPUP, `El máximo por recarga es $${WALLET_MAX_TOPUP.toLocaleString("es-CO")}.`),
+  method: z.enum(Object.keys(MANUAL_TOPUP_METHODS) as [keyof typeof MANUAL_TOPUP_METHODS, ...(keyof typeof MANUAL_TOPUP_METHODS)[]], { error: "Selecciona cómo se recibió el dinero." }),
+  reference: z.string().trim().max(80, "Máximo 80 caracteres.").default(""),
+  note: z.string().trim().max(200).default(""),
+});
+
 export const walletAdjustSchema = z.object({
   amount: z.number().int().refine((v) => v !== 0, "El monto no puede ser 0.").refine((v) => Math.abs(v) <= 10_000_000, "Monto demasiado alto."),
   note: trimmed(3, 255, "El motivo"),
 });
 
 export const cryptoSettingsSchema = z.object({
-  copPerUsdt: z.number().positive("La tasa debe ser mayor que 0.").max(100_000).nullable(),
+  copPerUnit: z.number().positive("La tasa debe ser mayor que 0.").max(100_000).nullable(),
 });
 
 /* ---------- Soporte ---------- */

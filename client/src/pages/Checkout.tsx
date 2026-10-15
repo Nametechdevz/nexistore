@@ -40,9 +40,9 @@ const PAY_COLORS: Record<string, string> = {
   wompi: "#1f1f6b",
   manual: "#7c3aed",
   paypal: "#1d4ed8",
-  binance: "#d4a106",
+  zenobank: "#7c5cff",
 };
-const PAY_SHORT: Record<string, string> = { wallet: "$", mercadopago: "MP", wompi: "W", manual: "TR", paypal: "PP", binance: "₮" };
+const PAY_SHORT: Record<string, string> = { wallet: "$", mercadopago: "MP", wompi: "W", manual: "TR", paypal: "PP", zenobank: "₿" };
 
 function PaymentLogos() {
   const store = useStore();
@@ -302,8 +302,8 @@ export function CheckoutPage() {
                 const detail =
                   m.id === "wallet"
                     ? `Saldo disponible: ${formatCOP(wallet.data?.balance ?? 0)}${walletShort ? " · no alcanza para este pedido" : ""}`
-                    : m.id === "binance" && m.configured && m.rate
-                      ? `Pagarás ${(Math.ceil((total / m.rate) * 100) / 100).toFixed(2)} USDT (tasa ${formatCOP(m.rate)}/USDT)`
+                    : m.id === "zenobank" && m.configured && m.rate
+                      ? `Pagarás ${(Math.ceil((total / m.rate) * 100) / 100).toFixed(2)} ${m.currency} en cripto (tasa ${formatCOP(m.rate)}/${m.currency})`
                       : m.configured
                         ? m.description
                         : m.pendingReason;

@@ -551,11 +551,12 @@ export function AdminReports() {
 export function AdminSettings() {
   useDocumentTitle("Configuración");
   const toast = useToast();
-  const s = useQuery(() => api.get<{ campaign: Record<string, unknown>; store: Record<string, unknown>; crypto: { copPerUsdt: number | null }; paymentMethods: PaymentMethodInfo[] }>("/api/admin/settings"));
+  const s = useQuery(() => api.get<{ campaign: Record<string, unknown>; store: Record<string, unknown>; crypto: { copPerUnit: number | null }; paymentMethods: PaymentMethodInfo[] }>("/api/admin/settings"));
   const [rate, setRate] = useState("");
+  const zenoCurrency = s.data?.paymentMethods.find((m) => m.id === "zenobank")?.currency ?? "USD";
   const [savingRate, setSavingRate] = useState(false);
   useEffect(() => {
-    if (s.data) setRate(s.data.crypto.copPerUsdt ? String(s.data.crypto.copPerUsdt) : "");
+    if (s.data) setRate(s.data.crypto.copPerUnit ? String(s.data.crypto.copPerUnit) : "");
   }, [s.data]);
   const campaign = useForm(campaignSchema, { enabled: true, titleLead: "", titleAccent: "", subtitle: "", ctaLabel: "", ctaHref: "/promociones", sealTop: "", sealValue: "", sealBottom: "", promoTitle: "", promoText: "", snow: true });
   const store = useForm(storeSettingsSchema, { storeName: "", supportEmail: "", supportWhatsapp: "", manualPaymentInstructions: "" });
@@ -588,17 +589,17 @@ export function AdminSettings() {
         </div>
       </div>
       <div className="panel">
-        <div className="panel-head"><h3>Criptomonedas (Binance Pay)</h3></div>
+        <div className="panel-head"><h3>Criptomonedas (Zenobank)</h3></div>
         <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
-          Binance Pay no cobra en pesos: cada pedido se cotiza en USDT con esta tasa y se guarda en el pedido. Actualízala con la frecuencia que necesites; los pedidos ya creados conservan su cotización.
+          Zenobank cotiza en {zenoCurrency}: cada pedido o recarga se convierte con esta tasa y la cotización queda guardada. El cliente paga el equivalente con USDT, USDC, BTC u otras criptomonedas. Actualízala cuando quieras; lo ya creado conserva su cotización.
         </p>
         <div className="form-row" style={{ alignItems: "end" }}>
-          <TextField label="Pesos colombianos por 1 USDT" inputMode="decimal" value={rate} onValue={(v) => setRate(v.replace(/[^\d.]/g, ""))} placeholder="Ej.: 4100" hint="Vacío = cripto deshabilitado." />
+          <TextField label={`Pesos colombianos por 1 ${zenoCurrency}`} inputMode="decimal" value={rate} onValue={(v) => setRate(v.replace(/[^\d.]/g, ""))} placeholder="Ej.: 4100" hint="Vacío = cripto deshabilitado." />
           <div>
             <button className="btn btn-primary" disabled={savingRate} onClick={async () => {
               setSavingRate(true);
               try {
-                await api.put("/api/admin/settings/crypto", { copPerUsdt: rate ? Number(rate) : null });
+                await api.put("/api/admin/settings/crypto", { copPerUnit: rate ? Number(rate) : null });
                 toast("success", "Tasa guardada.");
                 void s.reload();
               } catch (e) {

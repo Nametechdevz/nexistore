@@ -14,7 +14,7 @@ export interface CheckoutOrder {
 }
 
 export type CheckoutAction =
-  | { type: "redirect"; url: string }
+  | { type: "redirect"; url: string; /** id del pago en la pasarela, para consultarlo luego */ externalRef?: string }
   | { type: "instructions"; text: string };
 
 /** Resultado de un pago ya verificado con el proveedor (firma o consulta directa a su API). */
@@ -25,7 +25,7 @@ export interface VerifiedPayment {
   status: "approved" | "pending" | "rejected";
   amount: number; // COP enteros (si currency = COP)
   currency: string;
-  /** Monto en moneda extranjera tal como lo reporta el proveedor (ej. USDT). */
+  /** Monto en moneda extranjera tal como lo reporta el proveedor (ej. USD). */
   foreignAmount?: string;
   raw: unknown;
 }
@@ -40,7 +40,7 @@ export interface PaymentAdapter {
   /** Devuelve null si el evento no aplica; lanza si la firma es inválida. */
   handleWebhook?(req: Request): Promise<VerifiedPayment | null>;
   /** Consulta activa del estado (al volver del checkout). */
-  verify?(orderCode: string, query: Record<string, string>): Promise<VerifiedPayment | null>;
+  verify?(orderCode: string, query: Record<string, string>, externalRef?: string | null): Promise<VerifiedPayment | null>;
 }
 
 export class SignatureError extends Error {}

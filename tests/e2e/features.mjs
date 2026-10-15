@@ -71,9 +71,22 @@ step("Admin confirma la transferencia y acredita el saldo");
 
 await c.reload();
 await c.getByText("$100.000").first().waitFor();
+// (la recarga manual del admin se verifica más abajo)
 await c.locator(".ledger-row", { hasText: "Recarga" }).first().waitFor();
 await shot(c, "09c-billetera-saldo", true);
 step("El cliente ve el saldo y el movimiento");
+
+/* ---------- Admin: recarga manual a un cliente ---------- */
+await a.goto(`${BASE}/admin/billetera`);
+await a.getByLabel("Cliente", { exact: true }).fill("Laura");
+await a.locator(".search-hit", { hasText: email }).click();
+await a.getByLabel("Monto recibido (COP)").fill("50000");
+await a.getByLabel("N.º de comprobante").fill(`M${Date.now()}`);
+await shot(a, "10b-admin-recarga-manual");
+await a.getByRole("button", { name: /Acreditar \$50\.000/ }).click();
+await a.locator(".modal").getByRole("button", { name: "Acreditar saldo" }).click();
+await a.getByText(/acreditada\. Nuevo saldo: \$150\.000/).waitFor();
+step("Admin hace una recarga manual (Nequi + comprobante) desde el panel");
 
 /* ---------- Compra con billetera de producto automático ---------- */
 await c.goto(`${BASE}/producto/cineplus-premium-anual`);

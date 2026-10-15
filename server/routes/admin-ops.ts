@@ -2,17 +2,17 @@
 import { Router } from "express";
 import { z } from "zod";
 import { execute, query, queryOne, toIso, transaction } from "../db.js";
-import { ah, badRequest, conflict, intParam, likeEscape, notFound, pageParams, parse } from "../lib/http.js";
+import { ah, badRequest, conflict, HttpError, intParam, likeEscape, notFound, pageParams, parse } from "../lib/http.js";
 import { open, requireVault, vaultConfigured } from "../lib/vault.js";
 import { requireAdmin } from "../middleware/session.js";
 import { inventorySummary, markFallen, notifyReplacement, replaceItem, sealContent, syncAutoStock } from "../services/inventory.js";
 import { checkLowStock, listNotifications, markRead, notify, runAlerts } from "../services/notifications.js";
 import { addMessage, getTicket, listTickets, resolveIssue, suggestedRefund } from "../services/support.js";
-import { creditTopup, mapTopup, moveWallet } from "../services/wallet.js";
+import { creditTopup, mapTopup, moveWallet, newTopupCode } from "../services/wallet.js";
 import { INVENTORY_STATUSES } from "../../shared/constants.js";
 import { formatCOP } from "../../shared/pricing.js";
 import {
-  inventoryBulkSchema, inventoryFallSchema, inventoryUpdateSchema, resolveTicketSchema, ticketAdminMessageSchema, walletAdjustSchema,
+  adminTopupSchema, inventoryBulkSchema, inventoryFallSchema, MANUAL_TOPUP_METHODS, inventoryUpdateSchema, resolveTicketSchema, ticketAdminMessageSchema, walletAdjustSchema,
 } from "../../shared/schemas.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -274,6 +274,56 @@ adminOpsRouter.post(
     const r = await execute("UPDATE wallet_topups SET status = 'cancelled' WHERE code = ? AND status = 'pending'", [String(req.params.code)]);
     if (!r.affectedRows) throw conflict("La recarga no está pendiente.");
     res.json({ ok: true });
+  }),
+);
+
+/**
+ * Recarga manual: el administrador registra dinero recibido por fuera (Nequi, efectivo…) y lo
+ * acredita al instante. Queda como recarga pagada con método y comprobante, y no permite repetir
+ * el mismo comprobante del mismo método (evita acreditar dos veces).
+ */
+adminOpsRouter.post(
+  "/wallet/topups/manual",
+  ah(async (req, res) => {
+    const d = parse(adminTopupSchema, req.body);
+    const user = await queryOne<{ id: number; name: string }>("SELECT id, name FROM users WHERE id = ?", [d.userId]);
+    if (!user) throw new HttpError(422, "Revisa los datos.", { userId: "El cliente no existe." });
+    const ref = d.reference ? `${d.method}:${d.reference}` : `${d.method}:admin-${req.user!.id}-${Date.now()}`;
+    if (d.reference && (await queryOne("SELECT id FROM wallet_topups WHERE payment_ref = ? AND status = 'paid'", [ref]))) {
+      throw new HttpError(409, "Ese comprobante ya fue usado en otra recarga.", { reference: "Ese comprobante ya fue usado en otra recarga." });
+    }
+    const code = newTopupCode();
+    const label = MANUAL_TOPUP_METHODS[d.method];
+    const note = `Recarga manual (${label}${d.reference ? ` · ${d.reference}` : ""})${d.note ? ` · ${d.note}` : ""}`;
+    const balance = await transaction(async (conn) => {
+      await conn.execute(
+        "INSERT INTO wallet_topups (code, user_id, amount, provider, status, payment_ref, paid_at) VALUES (?, ?, ?, 'manual', 'paid', ?, UTC_TIMESTAMP())",
+        [code, d.userId, d.amount, ref],
+      );
+      return (await moveWallet(conn, d.userId, d.amount, "topup", { reference: code, note, actor: `admin:${req.user!.id}` })).balance;
+    });
+    await notify({
+      audience: "user",
+      userId: d.userId,
+      kind: "wallet",
+      title: `Recarga de ${formatCOP(d.amount)} acreditada`,
+      body: `${label}. Tu saldo disponible es ${formatCOP(balance)}.`,
+      link: "/cuenta/billetera",
+      email: true,
+    });
+    res.status(201).json({ code, balance });
+  }),
+);
+
+/** Búsqueda rápida de clientes para el formulario de recarga manual. */
+adminOpsRouter.get(
+  "/wallet/customers",
+  ah(async (req, res) => {
+    const q = String(req.query.q ?? "").trim().slice(0, 80);
+    if (q.length < 2) return res.json({ items: [] });
+    const like = `%${likeEscape(q)}%`;
+    const rows = await query<any>("SELECT id, name, email, wallet_balance FROM users WHERE name LIKE ? OR email LIKE ? ORDER BY name LIMIT 8", [like, like]);
+    res.json({ items: rows.map((r) => ({ id: r.id, name: r.name, email: r.email, walletBalance: Number(r.wallet_balance) })) });
   }),
 );
 

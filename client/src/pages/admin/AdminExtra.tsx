@@ -8,6 +8,7 @@ import { useDebounced, useDocumentTitle, useQuery } from "../../lib/hooks";
 import { useToast } from "../../lib/state";
 import { Chat, TICKET_STATUS, type TicketDetail } from "../account/AccountExtra";
 import { INVENTORY_STATUS_LABEL, type InventoryStatus } from "../../../../shared/constants";
+import { MANUAL_TOPUP_METHODS } from "../../../../shared/schemas";
 
 /* ================= Inventario de cuentas ================= */
 
@@ -330,7 +331,124 @@ function FallModal({ item, onClose, onDone }: { item: InvItem; onClose: () => vo
 
 /* ================= Billetera (admin) ================= */
 
-interface Topup { code: string; amount: number; provider: string; status: string; paymentCurrency: string | null; paymentAmountForeign: string | null; createdAt: string; customer?: { id: number; name: string; email: string } }
+interface CustomerHit { id: number; name: string; email: string; walletBalance: number }
+
+/**
+ * Recarga manual: el admin registra dinero recibido por fuera de la tienda (Nequi, Daviplata,
+ * efectivo…) y lo acredita al instante a la billetera del cliente.
+ */
+export function ManualTopupForm({ fixedCustomer, onDone }: { fixedCustomer?: { id: number; name: string }; onDone?: () => void }) {
+  const toast = useToast();
+  const [customer, setCustomer] = useState<CustomerHit | { id: number; name: string; email?: string; walletBalance?: number } | null>(fixedCustomer ?? null);
+  const [search, setSearch] = useState("");
+  const [hits, setHits] = useState<CustomerHit[]>([]);
+  const debounced = useDebounced(search.trim(), 250);
+  const [amount, setAmount] = useState("");
+  const [method, setMethod] = useState<keyof typeof MANUAL_TOPUP_METHODS>("nequi");
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (fixedCustomer || debounced.length < 2) {
+      setHits([]);
+      return;
+    }
+    let alive = true;
+    api.get<{ items: CustomerHit[] }>(`/api/admin/wallet/customers${qs({ q: debounced })}`).then((r) => alive && setHits(r.items)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [debounced, fixedCustomer]);
+
+  const value = Number(amount) || 0;
+  const submit = async () => {
+    setBusy(true);
+    setErrors({});
+    try {
+      const r = await api.post<{ code: string; balance: number }>("/api/admin/wallet/topups/manual", { userId: customer?.id ?? 0, amount: value, method, reference, note });
+      toast("success", `Recarga ${r.code} acreditada. Nuevo saldo: ${formatCOP(r.balance)}.`);
+      setAmount("");
+      setReference("");
+      setNote("");
+      if (!fixedCustomer) setCustomer(null);
+      onDone?.();
+    } catch (e) {
+      if (e instanceof ApiError) setErrors({ ...e.fields, _: e.message });
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <div className="form" style={{ gap: 16 }}>
+      {errors._ && <Alert kind="error">{errors._}</Alert>}
+      {!fixedCustomer && (
+        <div className="field" style={{ position: "relative" }}>
+          <label className="label" htmlFor="topup-customer">Cliente</label>
+          {customer ? (
+            <div className="user-chip" style={{ justifyContent: "space-between", width: "100%", borderRadius: 10, padding: "8px 12px" }}>
+              <span>
+                <strong>{customer.name}</strong> <span className="faint">{customer.email}</span>
+                {customer.walletBalance !== undefined && <span className="faint num"> · saldo {formatCOP(customer.walletBalance)}</span>}
+              </span>
+              <button className="icon-btn" onClick={() => setCustomer(null)} aria-label="Cambiar cliente"><Icon name="x" /></button>
+            </div>
+          ) : (
+            <>
+              <div className="input-wrap">
+                <Icon name="search" />
+                <input id="topup-customer" className="input" placeholder="Busca por nombre o correo…" value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
+              </div>
+              {hits.length > 0 && (
+                <div className="search-pop" style={{ top: "calc(100% + 4px)" }} role="listbox">
+                  {hits.map((h) => (
+                    <button key={h.id} className="search-hit" style={{ width: "100%", textAlign: "left" }} role="option" aria-selected={false} onClick={() => { setCustomer(h); setSearch(""); setHits([]); }}>
+                      <span className="avatar">{h.name.slice(0, 1).toUpperCase()}</span>
+                      <span style={{ flex: 1, minWidth: 0 }}><strong style={{ display: "block", fontSize: 14 }}>{h.name}</strong><span className="faint" style={{ fontSize: 12 }}>{h.email}</span></span>
+                      <span className="num faint" style={{ fontSize: 12 }}>{formatCOP(h.walletBalance)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {errors.userId && <p className="field-error">{errors.userId}</p>}
+        </div>
+      )}
+      <div className="amount-presets" role="group" aria-label="Montos sugeridos">
+        {[20000, 50000, 100000, 200000].map((a) => (
+          <button key={a} type="button" aria-pressed={value === a} onClick={() => setAmount(String(a))}>{formatCOP(a)}</button>
+        ))}
+      </div>
+      <div className="form-row">
+        <TextField label="Monto recibido (COP)" inputMode="numeric" value={amount} onValue={(v) => setAmount(v.replace(/\D/g, ""))} error={errors.amount} />
+        <SelectField label="Cómo se recibió" value={method} onValue={(v) => setMethod(v as keyof typeof MANUAL_TOPUP_METHODS)} error={errors.method} options={Object.entries(MANUAL_TOPUP_METHODS).map(([value, label]) => ({ value, label }))} />
+        <TextField label="N.º de comprobante" value={reference} onValue={setReference} error={errors.reference} maxLength={80} hint="Evita acreditar dos veces el mismo pago." />
+      </div>
+      <TextField label="Nota (opcional, visible al cliente)" value={note} onValue={setNote} maxLength={200} />
+      <div>
+        <button className="btn btn-primary" disabled={busy || !customer || value < 1000} onClick={() => setConfirming(true)}>
+          <Icon name="wallet" /> Acreditar {formatCOP(value)}
+        </button>
+      </div>
+      <ConfirmModal
+        open={confirming}
+        title="Confirmar recarga manual"
+        text={`Se acreditarán ${formatCOP(value)} a ${customer?.name ?? ""} (${MANUAL_TOPUP_METHODS[method]}${reference ? ` · ${reference}` : ""}). Confirma solo si ya verificaste que recibiste el dinero.`}
+        confirmLabel="Acreditar saldo"
+        busy={busy}
+        onClose={() => setConfirming(false)}
+        onConfirm={submit}
+      />
+    </div>
+  );
+}
+
+interface Topup { code: string; amount: number; provider: string; status: string; paymentRef: string | null; paymentCurrency: string | null; paymentAmountForeign: string | null; createdAt: string; customer?: { id: number; name: string; email: string } }
 
 export function AdminWallet() {
   useDocumentTitle("Billetera");
@@ -341,10 +459,14 @@ export function AdminWallet() {
   const [busy, setBusy] = useState(false);
   return (
     <>
-      <div className="dash-head"><div><h1 className="dash-title">Billetera</h1><p className="eyebrow">Recargas de saldo de los clientes. Para ajustar el saldo de un cliente, ve a Clientes.</p></div></div>
+      <div className="dash-head"><div><h1 className="dash-title">Billetera</h1><p className="eyebrow">Recarga saldo a tus clientes y revisa las recargas hechas desde la tienda.</p></div></div>
       <div className="stats">
         <div className="stat"><span className="stat-icon"><Icon name="wallet" /></span><div><strong className="num">{list.data ? formatCOP(list.data.totalBalances) : "–"}</strong><span>Saldo total de clientes</span></div></div>
         <div className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--info)" }}><Icon name="users" /></span><div><strong>{list.data?.usersWithBalance ?? "–"}</strong><span>Clientes con saldo</span></div></div>
+      </div>
+      <div className="panel" style={{ marginBottom: 20 }}>
+        <div className="panel-head"><h3>Recarga manual</h3><span className="hint">Dinero recibido por Nequi, Daviplata, Bancolombia, efectivo u otro medio.</span></div>
+        <ManualTopupForm onDone={() => void list.reload()} />
       </div>
       <div className="tabs" style={{ marginBottom: 16 }}>
         {[["pending", "Pendientes"], ["paid", "Acreditadas"], ["cancelled", "Canceladas"], ["", "Todas"]].map(([id, label]) => (
@@ -361,7 +483,18 @@ export function AdminWallet() {
                   <tr key={t.code}>
                     <td><strong className="num">{t.code}</strong><div className="faint" style={{ fontSize: 12 }}>{formatDateTime(t.createdAt)}</div></td>
                     <td>{t.customer?.name}<div className="faint" style={{ fontSize: 12 }}>{t.customer?.email}</div></td>
-                    <td className="muted">{PROVIDER_LABEL[t.provider] ?? t.provider}</td>
+                    <td className="muted">
+                      {PROVIDER_LABEL[t.provider] ?? t.provider}
+                      {t.provider === "manual" && t.paymentRef?.includes(":") && (() => {
+                        const [m, ref] = t.paymentRef!.split(/:(.*)/s);
+                        return (
+                          <div className="faint" style={{ fontSize: 12 }}>
+                            Recarga manual · {MANUAL_TOPUP_METHODS[m as keyof typeof MANUAL_TOPUP_METHODS] ?? m}
+                            {ref && !ref.startsWith("admin-") ? ` · ${ref}` : ""}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="t-right num t-strong">{formatCOP(t.amount)}{t.paymentAmountForeign && <div className="faint" style={{ fontSize: 12 }}>{t.paymentAmountForeign} {t.paymentCurrency}</div>}</td>
                     <td><span className={`status ${t.status === "paid" ? "status-completed" : t.status === "pending" ? "status-pending_payment" : "status-neutral"}`}>{t.status === "paid" ? "Acreditada" : t.status === "pending" ? "Pendiente" : "Cancelada"}</span></td>
                     <td className="t-right">
@@ -414,7 +547,11 @@ export function CustomerWalletModal({ customer, onClose }: { customer: { id: num
         <div className="form">
           <p>Saldo actual: <strong className="num price" style={{ fontSize: 22 }}>{formatCOP(q.data.balance)}</strong></p>
           <div className="panel" style={{ padding: 16 }}>
-            <p className="label" style={{ marginBottom: 8 }}>Ajuste manual</p>
+            <p className="label" style={{ marginBottom: 12 }}>Recarga manual</p>
+            <ManualTopupForm fixedCustomer={customer} onDone={() => void q.reload()} />
+          </div>
+          <div className="panel" style={{ padding: 16 }}>
+            <p className="label" style={{ marginBottom: 8 }}>Ajuste (corrección de saldo)</p>
             {error && <Alert kind="error">{error}</Alert>}
             <div className="form-row" style={{ alignItems: "end" }}>
               <SelectField label="Tipo" value={sign} onValue={(v) => setSign(v as "+")} options={[{ value: "+", label: "Acreditar (+)" }, { value: "-", label: "Debitar (−)" }]} />

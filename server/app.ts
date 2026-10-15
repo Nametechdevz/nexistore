@@ -29,7 +29,7 @@ export function createApp() {
           "img-src": ["'self'", "data:", "https:"],
           "font-src": ["'self'", "data:"],
           "connect-src": ["'self'"],
-          "form-action": ["'self'", "https://checkout.wompi.co", "https://www.mercadopago.com.co", "https://pay.binance.com", "https://accounts.google.com"],
+          "form-action": ["'self'", "https://checkout.wompi.co", "https://www.mercadopago.com.co", "https://pay.zenobank.io", "https://accounts.google.com"],
           "frame-ancestors": ["'none'"],
           "upgrade-insecure-requests": config.isProd ? [] : null,
         },
@@ -39,7 +39,7 @@ export function createApp() {
   );
 
   // Webhooks: cuerpo JSON propio, sin CSRF.
-  // Se guarda el cuerpo original: Binance Pay firma los bytes exactos del webhook.
+  // Se guarda el cuerpo original: Zenobank firma los bytes exactos del webhook.
   app.use(
     "/api/payments",
     express.json({

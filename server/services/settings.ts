@@ -36,7 +36,7 @@ export async function setSetting(name: string, value: unknown): Promise<void> {
 }
 
 export interface CryptoSettings {
-  /** Pesos colombianos por 1 USDT. null = Binance Pay deshabilitado hasta que el admin la defina. */
-  copPerUsdt: number | null;
+  /** Pesos colombianos por 1 unidad de la moneda de cotización de Zenobank (USD). null = cripto deshabilitado. */
+  copPerUnit: number | null;
 }
-export const DEFAULT_CRYPTO: CryptoSettings = { copPerUsdt: null };
+export const DEFAULT_CRYPTO: CryptoSettings = { copPerUnit: null };

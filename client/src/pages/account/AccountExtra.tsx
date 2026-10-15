@@ -60,7 +60,7 @@ export function WalletPage() {
   }, []);
 
   const selected = methods.find((m) => m.id === form.values.provider);
-  const usdt = selected?.id === "binance" && selected.rate ? (Math.ceil((Number(form.values.amount) / selected.rate) * 100) / 100).toFixed(2) : null;
+  const foreign = selected?.id === "zenobank" && selected.rate ? (Math.ceil((Number(form.values.amount) / selected.rate) * 100) / 100).toFixed(2) : null;
 
   const submit = form.submit(async (d) => {
     const r = await api.post<{ code: string; action: { type: "redirect"; url: string } | { type: "instructions"; text: string } }>("/api/account/wallet/topups", d);
@@ -118,7 +118,7 @@ export function WalletPage() {
               ))}
             </div>
             {form.errors.provider && <p className="field-error">{form.errors.provider}</p>}
-            {usdt && <Alert kind="info">Pagarás <strong className="num">{usdt} USDT</strong> (tasa {formatCOP(selected!.rate!)} por USDT).</Alert>}
+            {foreign && <Alert kind="info">Pagarás el equivalente a <strong className="num">{foreign} {selected!.currency}</strong> en cripto (tasa {formatCOP(selected!.rate!)} por {selected!.currency}).</Alert>}
             <div>
               <SubmitButton loading={form.submitting} disabled={!methods.some((m) => m.configured)}>
                 <Icon name="wallet" /> Recargar {formatCOP(Number(form.values.amount) || 0)}

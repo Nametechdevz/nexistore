@@ -1,8 +1,9 @@
-import { createHash, generateKeyPairSync, createSign } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { config } from "../server/config.js";
 import { execute, queryOne } from "../server/db.js";
-import { binanceSign, fromTradeNo, toTradeNo, verifyBinanceSignature } from "../server/payments/binance.js";
+import { verifyZenoSignature, zenoOrderId, zenoToCode } from "../server/payments/zenobank.js";
 import { runAlerts } from "../server/services/notifications.js";
 import { adminClient, app, checkoutBody, closePool, registered, resetDb } from "./helpers.js";
 
@@ -271,30 +272,151 @@ describe("alertas", () => {
   });
 });
 
-describe("Binance Pay (cripto)", () => {
-  it("firma HMAC-SHA512 y verificación RSA del webhook", () => {
-    expect(binanceSign("1", "abc", "{}", "secret")).toMatch(/^[0-9A-F]{128}$/);
-    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const body = '{"bizType":"PAY"}';
-    const s = createSign("RSA-SHA256");
-    s.update(`123\nnonce\n${body}\n`);
-    const sig = s.sign(privateKey, "base64");
-    const pem = publicKey.export({ type: "spki", format: "pem" }).toString();
-    expect(verifyBinanceSignature(pem, "123", "nonce", body, sig)).toBe(true);
-    expect(verifyBinanceSignature(pem, "123", "nonce", body.replace("PAY", "PAX"), sig)).toBe(false);
-    expect(fromTradeNo(toTradeNo("NS-20261015-ABC123"))).toBe("NS-20261015-ABC123");
-    expect(fromTradeNo(toTradeNo("WT-20261015-9F2A1C"))).toBe("WT-20261015-9F2A1C");
+describe("Zenobank (cripto)", () => {
+  const secretBytes = randomBytes(24);
+  const SECRET = `whsec_${secretBytes.toString("base64")}`;
+  const sign = (id: string, ts: string, body: string) => `v1,${createHmac("sha256", secretBytes).update(`${id}.${ts}.${body}`).digest("base64")}`;
+
+  it("verifica la firma igual que el SDK oficial", () => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    const body = '{"type":"checkout.completed"}';
+    const sig = sign("msg_1", ts, body);
+    expect(verifyZenoSignature({ secret: SECRET, id: "msg_1", timestamp: ts, signature: sig, rawBody: body })).toBe(true);
+    expect(verifyZenoSignature({ secret: SECRET, id: "msg_1", timestamp: ts, signature: `v1,otra ${sig}`, rawBody: body })).toBe(true);
+    expect(verifyZenoSignature({ secret: SECRET, id: "msg_1", timestamp: ts, signature: sig, rawBody: body.replace("completed", "expired") })).toBe(false);
+    expect(verifyZenoSignature({ secret: SECRET, id: "msg_2", timestamp: ts, signature: sig, rawBody: body })).toBe(false);
+    const old = String(Math.floor(Date.now() / 1000) - 600);
+    expect(verifyZenoSignature({ secret: SECRET, id: "msg_1", timestamp: old, signature: sign("msg_1", old, body), rawBody: body })).toBe(false);
+    expect(zenoToCode(zenoOrderId("NS-20261015-ABC123"))).toBe("NS-20261015-ABC123");
   });
 
-  it("queda pendiente de configuración sin llaves ni tasa", async () => {
+  it("queda pendiente de configuración sin llaves", async () => {
     const store = (await request(app).get("/api/catalog/store")).body;
-    const b = store.paymentMethods.find((m: { id: string }) => m.id === "binance");
-    expect(b.configured).toBe(false);
-    expect(b.currency).toBe("USDT");
+    const z = store.paymentMethods.find((m: { id: string }) => m.id === "zenobank");
+    expect(z.configured).toBe(false);
+    expect(z.pendingReason).toMatch(/ZENOBANK_API_KEY/);
     const u = await registered();
     const p = await product("docuplay-anual");
     await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
-    expect((await u.post("/api/checkout").send(checkoutBody("binance"))).status).toBe(400);
+    expect((await u.post("/api/checkout").send(checkoutBody("zenobank"))).status).toBe(400);
+  });
+
+  describe("con credenciales (API simulada)", () => {
+    const checkouts = new Map<string, Record<string, string>>();
+    let paidAmountOverride: string | null = null;
+
+    beforeAll(async () => {
+      config.ZENOBANK_API_KEY = "sk_test_123";
+      config.ZENOBANK_WEBHOOK_SECRET = SECRET;
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = String(input);
+        expect((init?.headers as Record<string, string>)["X-API-Key"]).toBe("sk_test_123");
+        if (url.endsWith("/api/v1/checkouts") && init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          const id = `ch_${checkouts.size + 1}`;
+          checkouts.set(id, { id, ...body, status: "OPEN", checkoutUrl: `https://pay.zenobank.io/${id}` });
+          return new Response(JSON.stringify(checkouts.get(id)), { status: 201 });
+        }
+        const m = url.match(/\/api\/v1\/checkouts\/(ch_\d+)$/);
+        if (m && checkouts.has(m[1]!)) {
+          const c = checkouts.get(m[1]!)!;
+          return new Response(JSON.stringify({ ...c, priceAmount: paidAmountOverride ?? c.priceAmount }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ message: "not found" }), { status: 404 });
+      });
+      const a = await adminClient();
+      await a.put("/api/admin/settings/crypto").send({ copPerUnit: 4000 }).expect(200);
+    });
+    afterAll(() => {
+      vi.restoreAllMocks();
+      config.ZENOBANK_API_KEY = undefined;
+      config.ZENOBANK_WEBHOOK_SECRET = undefined;
+    });
+
+    async function webhook(checkoutId: string, status: string) {
+      const c = checkouts.get(checkoutId)!;
+      c.status = status;
+      const body = JSON.stringify({ type: "checkout.completed", data: c });
+      const ts = String(Math.floor(Date.now() / 1000));
+      const id = `msg_${checkoutId}_${status}`;
+      return request(app)
+        .post("/api/payments/webhooks/zenobank")
+        .set("content-type", "application/json")
+        .set("zeno-id", id)
+        .set("zeno-timestamp", ts)
+        .set("zeno-signature", sign(id, ts, body))
+        .send(body);
+    }
+
+    it("cotiza en USD, redirige al checkout y confirma con el webhook firmado", async () => {
+      const u = await registered();
+      const p = await product("pdf-maestro");
+      await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
+      const res = await u.post("/api/checkout").send(checkoutBody("zenobank"));
+      expect(res.status).toBe(201);
+      expect(res.body.action.url).toMatch(/^https:\/\/pay\.zenobank\.io\/ch_/);
+      const checkoutId = res.body.action.url.split("/").pop();
+      const sent = checkouts.get(checkoutId)!;
+      expect(sent.priceCurrency).toBe("USD");
+      expect(sent.priceAmount).toBe((Math.ceil((p.price / 4000) * 100) / 100).toFixed(2));
+      expect(sent.orderId.startsWith(res.body.code)).toBe(true);
+      const order = (await u.get(`/api/orders/${res.body.code}`)).body.order;
+      expect(order.paymentAmountForeign).toBe(String(Number(sent.priceAmount)));
+      // Firma inválida → 401
+      const bad = await request(app).post("/api/payments/webhooks/zenobank").set("zeno-id", "x").set("zeno-timestamp", "1").set("zeno-signature", "v1,abc").send({});
+      expect(bad.status).toBe(401);
+      expect((await webhook(checkoutId, "COMPLETED")).body.result).toBe("paid");
+      expect((await u.get(`/api/orders/${res.body.code}`)).body.order.status).toBe("paid");
+    });
+
+    it("no confirma si el monto real no coincide y al volver consulta el estado", async () => {
+      const u = await registered();
+      const p = await product("ingles-total");
+      await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
+      const res = await u.post("/api/checkout").send(checkoutBody("zenobank"));
+      const checkoutId = res.body.action.url.split("/").pop();
+      paidAmountOverride = "0.01";
+      expect((await webhook(checkoutId, "COMPLETED")).body.result).toBe("mismatch");
+      paidAmountOverride = null;
+      expect((await u.get(`/api/orders/${res.body.code}`)).body.order.status).toBe("pending_payment");
+      // Consulta activa al volver (usa el id del checkout guardado en el pedido).
+      const v = await u.post(`/api/orders/${res.body.code}/verify-payment`).send({ params: {} });
+      expect(v.body.order.status).toBe("paid");
+    });
+
+    it("recarga de billetera con Zenobank", async () => {
+      const u = await registered();
+      const t = await u.post("/api/account/wallet/topups").send({ amount: 40000, provider: "zenobank" });
+      expect(t.status).toBe(201);
+      expect(t.body.foreign).toEqual({ currency: "USD", amount: "10.00" });
+      const checkoutId = t.body.action.url.split("/").pop();
+      expect((await webhook(checkoutId, "COMPLETED")).body.result).toBe("paid");
+      expect((await u.get("/api/account/wallet")).body.balance).toBe(40000);
+    });
+  });
+});
+
+describe("recargas manuales desde el panel", () => {
+  it("el admin acredita saldo con método y comprobante; no repite comprobantes", async () => {
+    const u = await registered();
+    const a = await adminClient();
+    const found = (await a.get(`/api/admin/wallet/customers?q=${encodeURIComponent(u.email)}`)).body.items;
+    expect(found[0].id).toBe(u.user.id);
+    const r = await a.post("/api/admin/wallet/topups/manual").send({ userId: u.user.id, amount: 75000, method: "nequi", reference: "M123456", note: "Pago por WhatsApp" });
+    expect(r.status).toBe(201);
+    expect(r.body.balance).toBe(75000);
+    const dup = await a.post("/api/admin/wallet/topups/manual").send({ userId: u.user.id, amount: 75000, method: "nequi", reference: "M123456" });
+    expect(dup.status).toBe(409);
+    expect((await a.post("/api/admin/wallet/topups/manual").send({ userId: 999999, amount: 5000, method: "efectivo" })).status).toBe(422);
+    expect((await a.post("/api/admin/wallet/topups/manual").send({ userId: u.user.id, amount: 0, method: "efectivo" })).status).toBe(422);
+    expect((await u.post("/api/admin/wallet/topups/manual").send({ userId: u.user.id, amount: 5000, method: "efectivo" })).status).toBe(403);
+    const w = (await u.get("/api/account/wallet")).body;
+    expect(w.balance).toBe(75000);
+    expect(w.transactions[0]).toMatchObject({ kind: "topup", amount: 75000 });
+    expect(w.transactions[0].note).toMatch(/Recarga manual \(Nequi · M123456\)/);
+    expect(w.topups[0]).toMatchObject({ status: "paid", provider: "manual" });
+    const list = (await a.get("/api/admin/wallet/topups?status=paid")).body.items;
+    expect(list.some((t: { code: string }) => t.code === r.body.code)).toBe(true);
   });
 
   it("reembolso de pedido completo a la billetera", async () => {

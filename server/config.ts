@@ -43,8 +43,11 @@ const schema = z.object({
   WOMPI_INTEGRITY_SECRET: z.string().optional(),
   WOMPI_EVENTS_SECRET: z.string().optional(),
 
-  BINANCE_PAY_API_KEY: z.string().optional(),
-  BINANCE_PAY_SECRET_KEY: z.string().optional(),
+  ZENOBANK_API_KEY: z.string().optional(),
+  ZENOBANK_WEBHOOK_SECRET: z.string().optional(),
+  /** Moneda en que se cotiza en Zenobank (USD por defecto; COP si tu cuenta la admite). */
+  ZENOBANK_PRICE_CURRENCY: z.string().regex(/^[A-Za-z]{3,5}$/).optional(),
+  ZENOBANK_API_URL: z.string().url().optional(),
 
   /** 32 bytes (64 hex o base64) para cifrar las credenciales del inventario. */
   INVENTORY_ENCRYPTION_KEY: z.string().optional(),
