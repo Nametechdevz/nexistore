@@ -543,9 +543,85 @@
   background: var(--surface-2);
   color: var(--text);
 }
+.drawer nav a.active {
+  background: var(--accent-soft);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.drawer nav a.active svg {
+  color: var(--accent-hover);
+}
 .drawer nav svg {
   width: 19px;
   height: 19px;
+}
+.drawer {
+  background: radial-gradient(120% 50% at 0% 0%, rgba(227, 18, 44, 0.16), transparent 60%), var(--bg-elev);
+  box-shadow: 24px 0 60px -20px rgba(0, 0, 0, 0.7);
+  padding-bottom: calc(var(--s-5) + env(safe-area-inset-bottom));
+  outline: none;
+}
+.drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.drawer-cta {
+  display: grid;
+  gap: var(--s-2);
+}
+.drawer-user {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 12px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.drawer-user .avatar {
+  width: 40px;
+  height: 40px;
+  font-size: var(--fs-md);
+}
+.drawer-user strong,
+.drawer-user small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.drawer-user small {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.drawer-foot {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-2);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+.drawer-foot a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+}
+.drawer-foot svg {
+  width: 17px;
+  height: 17px;
+  color: var(--accent-hover);
 }
 @keyframes fade {
   from {
@@ -1107,6 +1183,7 @@
 }
 .gallery-thumbs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--s-3);
   margin-top: var(--s-3);
 }
@@ -2622,5 +2699,135 @@
 @media (max-width: 640px) {
   .wallet-hero {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ============ Subida de imágenes ============ */
+.uploader {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+}
+.uploader.is-single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 420px;
+}
+.up-item,
+.up-drop {
+  position: relative;
+  aspect-ratio: var(--aspect, 1 / 1);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin: 0;
+}
+.up-item {
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+}
+.up-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.up-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+}
+.up-actions {
+  position: absolute;
+  inset: auto 6px 6px 6px;
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.up-actions button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(10, 11, 16, 0.78);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+.up-actions button:hover {
+  background: rgba(10, 11, 16, 0.95);
+}
+.up-actions button.danger:hover {
+  background: var(--accent);
+}
+.up-drop {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  text-align: center;
+  border: 1.5px dashed var(--line-strong);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.up-drop small {
+  color: var(--text-3);
+  font-weight: 500;
+  font-size: 11px;
+}
+.up-drop:hover,
+.up-drop.is-drag {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.up-drop svg {
+  color: var(--accent);
+}
+
+/* ============ Fondos de campaña (ilustración incluida o imagen subida en el panel) ============ */
+.hero.has-bg::before {
+  background: linear-gradient(90deg, rgba(8, 9, 12, 0.94) 0%, rgba(8, 9, 12, 0.72) 34%, rgba(8, 9, 12, 0.12) 64%, rgba(8, 9, 12, 0) 100%),
+    linear-gradient(0deg, var(--bg) 0%, rgba(8, 9, 12, 0) 22%),
+    var(--hero-bg) 70% center / cover no-repeat,
+    var(--bg);
+}
+.auth-aside.has-bg {
+  background: linear-gradient(0deg, rgba(8, 9, 12, 0.96) 0%, rgba(8, 9, 12, 0.7) 38%, rgba(8, 9, 12, 0.05) 70%),
+    var(--auth-bg) 72% center / cover no-repeat,
+    var(--bg);
+}
+.promo.has-bg {
+  background: linear-gradient(90deg, rgba(18, 2, 8, 0.96) 0%, rgba(18, 2, 8, 0.78) 40%, rgba(18, 2, 8, 0.1) 75%),
+    var(--promo-bg) right 30% / cover no-repeat,
+    #120208;
+}
+.promo.has-bg h2,
+.promo.has-bg p {
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+}
+.form-sep {
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+.form-sep h4 {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  margin-bottom: 4px;
+}
+@media (max-width: 900px) {
+  .hero.has-bg::before {
+    background: linear-gradient(180deg, rgba(8, 9, 12, 0.1) 0%, rgba(8, 9, 12, 0.55) 45%, rgba(8, 9, 12, 0.96) 72%, var(--bg) 100%),
+      var(--hero-bg) 78% top / cover no-repeat,
+      var(--bg);
   }
 }

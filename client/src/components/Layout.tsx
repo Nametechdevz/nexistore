@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
 import { NotificationBell } from "./Notifications";
-import { Logo, ProductArt } from "./ui";
+import { Drawer, Logo, ProductArt } from "./ui";
 import { api, qs } from "../lib/api";
 import { formatCOP } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
@@ -178,6 +178,7 @@ export function Header() {
   const { user, ready } = useSession();
   const cart = useCart();
   const [drawer, setDrawer] = useState(false);
+  const closeDrawer = useCallback(() => setDrawer(false), []);
   const location = useLocation();
   useEffect(() => {
     setDrawer(false);
@@ -216,16 +217,28 @@ export function Header() {
           ))}
         </nav>
       </div>
-      {drawer && (
-        <>
-          <div className="drawer-backdrop" onClick={() => setDrawer(false)} />
-          <aside className="drawer" aria-label="Menú">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <Drawer open={drawer} onClose={closeDrawer} label="Menú">
+            <div className="drawer-head">
               <Logo />
-              <button className="icon-btn" onClick={() => setDrawer(false)} aria-label="Cerrar menú">
+              <button className="icon-btn" onClick={closeDrawer} aria-label="Cerrar menú">
                 <Icon name="x" />
               </button>
             </div>
+            {ready && !user && (
+              <div className="drawer-cta">
+                <Link to="/ingresar" className="btn btn-primary btn-block">Iniciar sesión</Link>
+                <Link to="/registro" className="btn btn-outline btn-block">Crear cuenta</Link>
+              </div>
+            )}
+            {user && (
+              <Link to="/cuenta" className="drawer-user">
+                <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
+                <span>
+                  <strong>{user.name}</strong>
+                  <small>{user.email}</small>
+                </span>
+              </Link>
+            )}
             <nav>
               {NAV.map((n) => (
                 <NavLink key={n.to} to={n.to} end={n.end}>
@@ -243,9 +256,11 @@ export function Header() {
                 </NavLink>
               )}
             </nav>
-          </aside>
-        </>
-      )}
+            <div className="drawer-foot">
+              <Link to="/carrito"><Icon name="cart" /> Carrito{cart.count > 0 ? ` (${cart.count})` : ""}</Link>
+              <Link to="/soporte"><Icon name="headphones" /> Soporte</Link>
+            </div>
+      </Drawer>
     </header>
   );
 }

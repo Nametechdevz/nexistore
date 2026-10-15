@@ -188,7 +188,7 @@ export function CartPage() {
   );
 }
 
-const buyerStep = checkoutSchema.pick({ buyerName: true, buyerEmail: true, buyerPhone: true, buyerDocument: true, notes: true });
+const buyerStep = checkoutSchema.pick({ buyerName: true, buyerEmail: true, buyerPhone: true, notes: true });
 
 export function CheckoutPage() {
   useDocumentTitle("Finalizar compra");
@@ -208,7 +208,6 @@ export function CheckoutPage() {
     buyerName: user?.name ?? "",
     buyerEmail: user?.email ?? "",
     buyerPhone: user?.phone ?? "",
-    buyerDocument: user?.documentId ?? "",
     paymentProvider: (user?.preferredPayment as "manual") ?? "manual",
     couponCode: cart.coupon,
     notes: "",
@@ -216,7 +215,7 @@ export function CheckoutPage() {
   });
 
   useEffect(() => {
-    if (user) form.setValues((v) => ({ ...v, buyerName: v.buyerName || user.name, buyerEmail: v.buyerEmail || user.email, buyerPhone: v.buyerPhone || user.phone || "", buyerDocument: v.buyerDocument || user.documentId || "" }));
+    if (user) form.setValues((v) => ({ ...v, buyerName: v.buyerName || user.name, buyerEmail: v.buyerEmail || user.email, buyerPhone: v.buyerPhone || user.phone || "" }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
   useEffect(() => {
@@ -270,15 +269,12 @@ export function CheckoutPage() {
         {step === 1 ? (
           <form className="form" onSubmit={nextStep} noValidate>
             <h1 className="page-title" style={{ fontSize: "var(--fs-xl)" }}>Datos del comprador</h1>
-            <p className="muted" style={{ marginTop: -12 }}>Usaremos estos datos para la factura y para enviarte tu producto.</p>
+            <p className="muted" style={{ marginTop: -12 }}>Usaremos estos datos para enviarte tu producto y contactarte si hace falta.</p>
             <div className="form-row">
               <TextField label="Nombre completo" value={form.values.buyerName} onValue={(v) => form.set("buyerName", v)} error={form.errors.buyerName} autoComplete="name" />
               <TextField label="Correo electrónico" type="email" value={form.values.buyerEmail} onValue={(v) => form.set("buyerEmail", v)} error={form.errors.buyerEmail} autoComplete="email" />
             </div>
-            <div className="form-row">
-              <TextField label="Celular" type="tel" value={form.values.buyerPhone} onValue={(v) => form.set("buyerPhone", v)} error={form.errors.buyerPhone} autoComplete="tel" placeholder="300 123 4567" />
-              <TextField label="Documento de identidad" value={form.values.buyerDocument} onValue={(v) => form.set("buyerDocument", v)} error={form.errors.buyerDocument} inputMode="numeric" />
-            </div>
+            <TextField label="Celular" type="tel" value={form.values.buyerPhone} onValue={(v) => form.set("buyerPhone", v)} error={form.errors.buyerPhone} autoComplete="tel" placeholder="300 123 4567" />
             <TextArea label="Notas del pedido (opcional)" value={form.values.notes ?? ""} onValue={(v) => form.set("notes", v)} error={form.errors.notes} rows={3} hint="Por ejemplo, el número a recargar." maxLength={500} />
             <div style={{ display: "flex", gap: 12, justifyContent: "space-between", flexWrap: "wrap" }}>
               <Link to="/carrito" className="btn btn-ghost"><Icon name="arrow-left" /> Volver al carrito</Link>

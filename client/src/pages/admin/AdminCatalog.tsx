@@ -9,7 +9,8 @@ import { api, ApiError, qs } from "../../lib/api";
 import { formatCOP, formatDate, PROVIDER_LABEL, slugify } from "../../lib/format";
 import { useDebounced, useDocumentTitle, useForm, useQuery } from "../../lib/hooks";
 import { useToast } from "../../lib/state";
-import { categoryInputSchema, productInputSchema } from "../../../../shared/schemas";
+import { categoryInputSchema, MAX_PRODUCT_IMAGES, productInputSchema } from "../../../../shared/schemas";
+import { ImageUploader } from "../../components/ImageUploader";
 import type { Category, Order, PaymentMethodInfo, ProductDetail, ProductSummary } from "../../../../shared/types";
 
 /* ================= Dashboard ================= */
@@ -128,7 +129,7 @@ export function OrdersTable({ orders }: { orders: Order[] }) {
 type ProductForm = {
   name: string; slug: string; categoryId: number; summary: string; description: string; includesText: string; instructions: string;
   deliveryText: string; warrantyText: string; durationLabel: string; accountLabel: string; price: number; compareAtPrice: number | null;
-  stock: number; maxPerOrder: number; artGlyph: string; artColor: string | null; imageUrl: string; isFeatured: boolean; isActive: boolean;
+  stock: number; maxPerOrder: number; artGlyph: string; artColor: string | null; imageUrl: string; images: string[]; isFeatured: boolean; isActive: boolean;
   deliveryMode: "manual" | "auto"; durationDays: number | null; lowStockThreshold: number;
 };
 
@@ -136,7 +137,7 @@ const emptyProduct = (categoryId = 0): ProductForm => ({
   name: "", slug: "", categoryId, summary: "", description: "", includesText: "", instructions: "",
   deliveryText: "Entrega digital en tu panel de usuario (Mis pedidos → Ver detalle) una vez confirmado el pago.",
   warrantyText: "Garantía de funcionamiento durante todo el periodo contratado.",
-  durationLabel: "", accountLabel: "", price: 0, compareAtPrice: null, stock: 0, maxPerOrder: 5, artGlyph: "", artColor: null, imageUrl: "",
+  durationLabel: "", accountLabel: "", price: 0, compareAtPrice: null, stock: 0, maxPerOrder: 5, artGlyph: "", artColor: null, imageUrl: "", images: [],
   isFeatured: false, isActive: true, deliveryMode: "manual", durationDays: null, lowStockThreshold: 5,
 });
 
@@ -154,7 +155,7 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
       name: p.name, slug: p.slug, categoryId: p.categoryId, summary: p.summary, description: p.description, includesText: p.includesText,
       instructions: p.instructions, deliveryText: p.deliveryText, warrantyText: p.warrantyText, durationLabel: p.durationLabel, accountLabel: p.accountLabel,
       price: p.price, compareAtPrice: p.compareAtPrice, stock: p.stock, maxPerOrder: p.maxPerOrder, artGlyph: p.artGlyph,
-      artColor: p.rawArtColor, imageUrl: p.imageUrl ?? "", isFeatured: p.isFeatured, isActive: p.isActive,
+      artColor: p.rawArtColor, imageUrl: "", images: p.images ?? (p.imageUrl ? [p.imageUrl] : []), isFeatured: p.isFeatured, isActive: p.isActive,
       deliveryMode: p.deliveryMode, durationDays: p.durationDays, lowStockThreshold: (p as unknown as { lowStockThreshold?: number }).lowStockThreshold ?? 5,
     });
     return p;
@@ -182,7 +183,7 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
           {form.formError && <Alert kind="error">{form.formError}</Alert>}
           <div style={{ display: "grid", gridTemplateColumns: "120px minmax(0,1fr)", gap: 20, alignItems: "start" }}>
             <div style={{ borderRadius: 14, overflow: "hidden" }}>
-              <ProductArt glyph={v.artGlyph || v.name.slice(0, 1).toUpperCase() || "?"} color={v.artColor || cat?.color || "#e3122c"} imageUrl={v.imageUrl || null} name={v.name.split(" ")[0]} />
+              <ProductArt glyph={v.artGlyph || v.name.slice(0, 1).toUpperCase() || "?"} color={v.artColor || cat?.color || "#e3122c"} imageUrl={v.images[0] ?? null} name={v.name.split(" ")[0]} />
             </div>
             <div className="form" style={{ gap: 16 }}>
               <TextField label="Nombre" value={v.name} error={form.errors.name} onValue={(val) => { form.set("name", val); if (!slugTouched) form.set("slug", slugify(val)); }} />
@@ -220,8 +221,15 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
           <div className="form-row">
             <TextField label="Monograma del arte" value={v.artGlyph} onValue={(val) => form.set("artGlyph", val.slice(0, 4))} hint="1–4 caracteres." />
             <TextField label="Color del arte (opcional)" value={v.artColor ?? ""} error={form.errors.artColor} onValue={(val) => form.set("artColor", val || null)} placeholder={cat?.color ?? "#e3122c"} />
-            <TextField label="Imagen (URL https, opcional)" value={v.imageUrl} error={form.errors.imageUrl} onValue={(val) => form.set("imageUrl", val)} placeholder="https://…" />
           </div>
+          <ImageUploader
+            label="Imágenes del producto"
+            value={v.images}
+            onChange={(urls) => form.set("images", urls)}
+            max={MAX_PRODUCT_IMAGES}
+            hint={`Hasta ${MAX_PRODUCT_IMAGES} imágenes (JPG, PNG, WebP o GIF). La primera es la principal; usa las flechas para cambiar el orden. Sin imágenes se muestra el arte con el monograma y el color.`}
+          />
+          {form.errors.images && <p className="field-error">{form.errors.images}</p>}
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
             <Check checked={v.isActive} onChange={(val) => form.set("isActive", val)}>Visible en la tienda</Check>
             <Check checked={v.isFeatured} onChange={(val) => form.set("isFeatured", val)}>Destacado en inicio</Check>

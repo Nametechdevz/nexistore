@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { execute } from "./db.js";
 import { migrate } from "./migrate.js";
+import { cleanupMedia } from "./services/media.js";
 import { runAlerts } from "./services/notifications.js";
 import { expireStaleOrders } from "./services/orders.js";
 import { queryOne } from "./db.js";
@@ -56,7 +57,7 @@ async function main() {
     console.log(`NexiStore escuchando en http://localhost:${config.PORT} (${config.NODE_ENV})`);
   });
 
-  // Mantenimiento cada hora: sesiones vencidas, pedidos sin pagar > 48 h y alertas de inventario.
+  // Mantenimiento cada hora: sesiones vencidas, pedidos sin pagar > 48 h, alertas de inventario e imágenes sin usar.
   const maintenance = async () => {
     try {
       await execute("DELETE FROM sessions WHERE expires_at < UTC_TIMESTAMP()");
@@ -66,6 +67,8 @@ async function main() {
       // Alertas: cuentas por vencer, servicios de clientes por terminar, vencidas y poco inventario.
       const a = await runAlerts();
       if (a.expired || a.customerNotices) console.log(`Alertas: ${a.expired} cuenta(s) vencida(s), ${a.customerNotices} aviso(s) a clientes.`);
+      // Imágenes subidas que ya no usa ningún producto ni fondo.
+      await cleanupMedia();
     } catch (err) {
       console.error("Error en mantenimiento:", err);
     }

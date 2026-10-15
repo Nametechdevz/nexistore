@@ -106,7 +106,6 @@ await page.waitForURL(/\/checkout/);
 step("Registro y regreso al checkout");
 
 await page.getByLabel("Celular").fill("3001234567");
-await page.getByLabel("Documento de identidad").fill("1020304050");
 await shot(page, "04b-checkout-datos");
 await page.getByRole("button", { name: /Continuar/ }).click();
 await page.getByRole("heading", { name: "Método de pago" }).waitFor();

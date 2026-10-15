@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { ProductCard } from "../components/ProductCard";
@@ -22,6 +22,9 @@ export function ProductPage() {
   const store = useStore();
   const navigate = useNavigate();
   const [view, setView] = useState(0);
+  useEffect(() => {
+    setView(0);
+  }, [slug]);
   const [qty, setQty] = useState(1);
 
   if (error?.status === 404)
@@ -55,7 +58,8 @@ export function ProductPage() {
   const inCart = cart.lines.find((l) => l.productId === p.id)?.quantity ?? 0;
   const maxAllowed = Math.max(0, Math.min(p.maxPerOrder, p.stock) - inCart);
   const soldOut = p.stock <= 0;
-  // Galería: 3 composiciones del arte propio (o la imagen subida por el administrador).
+  // Imágenes subidas por el administrador; si no hay, 3 composiciones del arte propio.
+  const images = p.images?.length ? p.images : p.imageUrl ? [p.imageUrl] : [];
   const views = [
     { ribbon: false, icon: undefined as string | undefined },
     { ribbon: Boolean(store?.campaign.enabled), icon: undefined },
@@ -90,13 +94,22 @@ export function ProductPage() {
       <div className="pdp">
         <div>
           <div className="gallery-main">
-            {p.imageUrl ? (
-              <ProductArt glyph={p.artGlyph} color={p.artColor} imageUrl={p.imageUrl} />
+            {images.length ? (
+              <ProductArt glyph={p.artGlyph} color={p.artColor} imageUrl={images[Math.min(view, images.length - 1)]!} />
             ) : (
               <ProductArt glyph={p.artGlyph} color={p.artColor} name={p.name} ribbon={views[view]!.ribbon} icon={views[view]!.icon} />
             )}
           </div>
-          {!p.imageUrl && (
+          {images.length > 1 && (
+            <div className="gallery-thumbs" role="group" aria-label="Imágenes del producto">
+              {images.map((src, i) => (
+                <button key={src} aria-pressed={view === i} onClick={() => setView(i)} aria-label={`Imagen ${i + 1}`}>
+                  <ProductArt glyph={p.artGlyph} color={p.artColor} imageUrl={src} showName={false} />
+                </button>
+              ))}
+            </div>
+          )}
+          {!images.length && (
             <div className="gallery-thumbs" role="group" aria-label="Vistas del producto">
               {views.map((v, i) => (
                 <button key={i} aria-pressed={view === i} onClick={() => setView(i)} aria-label={`Vista ${i + 1}`}>

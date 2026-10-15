@@ -25,14 +25,15 @@ export function setCsrfToken(token: string | undefined) {
 
 async function request<T>(method: string, url: string, body?: unknown, retry = true): Promise<T> {
   const headers: Record<string, string> = { accept: "application/json" };
-  if (body !== undefined) headers["content-type"] = "application/json";
+  const raw = body instanceof Blob;
+  if (body !== undefined) headers["content-type"] = raw ? body.type || "application/octet-stream" : "application/json";
   if (method !== "GET") {
     const token = readCookie("nx_csrf") ?? csrfToken;
     if (token) headers["x-csrf-token"] = decodeURIComponent(token);
   }
   let res: Response;
   try {
-    res = await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body) });
+    res = await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
   } catch {
     throw new ApiError(0, "No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.");
   }
@@ -55,6 +56,8 @@ export const api = {
   put: <T>(url: string, body: unknown = {}) => request<T>("PUT", url, body),
   patch: <T>(url: string, body: unknown = {}) => request<T>("PATCH", url, body),
   del: <T>(url: string) => request<T>("DELETE", url),
+  /** Envía un archivo tal cual (sin JSON). */
+  upload: <T>(url: string, file: Blob) => request<T>("POST", url, file),
 };
 
 export function qs(params: Record<string, string | number | boolean | undefined | null>): string {

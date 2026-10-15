@@ -37,6 +37,17 @@ export function mapProduct(r: any): ProductSummary {
   };
 }
 
+/** Galería guardada como JSON; los productos antiguos solo tienen image_url. */
+export function parseGallery(raw: string | null, main: string | null): string[] {
+  try {
+    const arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr) && arr.every((x) => typeof x === "string") && arr.length) return arr;
+  } catch {
+    /* JSON dañado: se usa la imagen principal */
+  }
+  return main ? [main] : [];
+}
+
 export function mapCategory(r: any): Category {
   return {
     id: r.id,
@@ -124,7 +135,7 @@ export async function listProducts(f: ProductFilters): Promise<{ items: ProductS
 export async function getProductBySlug(slug: string, includeInactive = false): Promise<ProductDetail | null> {
   const r = await queryOne<any>(
     `SELECT ${PRODUCT_COLUMNS}, p.description, p.includes_text, p.instructions, p.delivery_text, p.warranty_text,
-            p.duration_label, p.account_label
+            p.duration_label, p.account_label, p.gallery
        FROM products p JOIN categories c ON c.id = p.category_id
       WHERE p.slug = ? ${includeInactive ? "" : "AND p.is_active = 1 AND c.is_active = 1"}`,
     [slug],
@@ -145,6 +156,7 @@ export async function getProductBySlug(slug: string, includeInactive = false): P
     warrantyText: r.warranty_text,
     durationLabel: r.duration_label,
     accountLabel: r.account_label,
+    images: parseGallery(r.gallery, r.image_url),
     categoryId: r.category_id,
     isActive: toBool(r.is_active),
     reviews: reviews.map((v) => ({

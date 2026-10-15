@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { HttpError } from "./lib/http.js";
 import { appRoot } from "./lib/paths.js";
 import { rememberOrigin } from "./services/integrations.js";
+import { getMedia, MEDIA_URL_RE } from "./services/media.js";
 import { ensureCsrf, loadSession, parseCookies, verifyCsrf } from "./middleware/session.js";
 import { accountRouter } from "./routes/account.js";
 import { adminRouter } from "./routes/admin.js";
@@ -34,7 +35,7 @@ export function createApp() {
           "default-src": ["'self'"],
           "script-src": ["'self'"],
           "style-src": ["'self'", "'unsafe-inline'"],
-          "img-src": ["'self'", "data:", "https:"],
+          "img-src": ["'self'", "data:", "blob:", "https:"],
           "font-src": ["'self'", "data:"],
           "connect-src": ["'self'"],
           "form-action": ["'self'", "https://checkout.wompi.co", "https://www.mercadopago.com.co", "https://pay.zenobank.io", "https://accounts.google.com"],
@@ -71,6 +72,21 @@ export function createApp() {
   });
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "Ruta no encontrada." });
+  });
+
+  // Imágenes subidas desde el panel. La URL lleva un token aleatorio, así que se cachean un año.
+  app.get(/^\/media\//, async (req, res, next) => {
+    try {
+      const m = MEDIA_URL_RE.exec(req.path);
+      const media = m ? await getMedia(Number(m[1]), m[2]!) : null;
+      if (!media) return res.status(404).type("text/plain").send("No encontrada");
+      res.setHeader("content-type", media.mime);
+      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+      res.setHeader("content-disposition", "inline");
+      res.send(media.data);
+    } catch (err) {
+      next(err);
+    }
   });
 
   // Frontend compilado (producción). Rutas del SPA → index.html.

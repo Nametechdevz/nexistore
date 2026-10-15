@@ -4,7 +4,8 @@ import { Icon } from "../components/Icon";
 import { Alert, Check, Logo, SubmitButton, TextField } from "../components/ui";
 import { api } from "../lib/api";
 import { useDocumentTitle, useForm } from "../lib/hooks";
-import { useSession, useToast } from "../lib/state";
+import { useSession, useStore, useToast } from "../lib/state";
+import { backgroundFor } from "../lib/format";
 import { forgotSchema, loginSchema, registerSchema, resetSchema } from "../../../shared/schemas";
 
 const GOOGLE_ERRORS: Record<string, string> = {
@@ -20,19 +21,21 @@ const GOOGLE_ERRORS: Record<string, string> = {
 const safeNext = (n: string | null) => (n && n.startsWith("/") && !n.startsWith("//") ? n : "/cuenta");
 
 function AuthShell({ children }: { children: ReactNode }) {
+  const store = useStore();
+  const bg = backgroundFor(store?.campaign, "auth");
   return (
     <div className="auth">
       <div className="auth-form">
         <div className="auth-form-inner">{children}</div>
       </div>
-      <aside className="auth-aside" aria-hidden="true">
-        <div className="snow" />
-        <div style={{ position: "absolute", inset: "8% 8% auto auto", width: "46%", transform: "rotate(8deg)" }}>
+      <aside className={`auth-aside${bg ? " has-bg" : ""}`} aria-hidden="true" style={bg ? { ["--auth-bg" as string]: `url("${bg}")` } : undefined}>
+        {store?.campaign.enabled && store.campaign.snow && <div className="snow" />}
+        {!bg && <div style={{ position: "absolute", inset: "8% 8% auto auto", width: "46%", transform: "rotate(8deg)" }}>
           <div className="art" style={{ ["--hue" as string]: "#e3122c", borderRadius: 22, boxShadow: "var(--shadow-3)" }}>
             <div className="art-ribbon" />
             <div className="art-glyph"><Icon name="gift" /></div>
           </div>
-        </div>
+        </div>}
         <h2>¡Forma parte de NexiStore!</h2>
         <ul className="benefits">
           <li><Icon name="percent" /> Acceso a promociones exclusivas</li>
@@ -45,18 +48,17 @@ function AuthShell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Acceso con Google: solo aparece cuando el administrador lo activa en Configuración. */
 function GoogleButton() {
   const { googleEnabled } = useSession();
-  if (!googleEnabled)
-    return (
-      <button type="button" className="btn btn-outline btn-block" disabled title="Se activa en Admin → Configuración → Pagos, correo y acceso">
-        <GoogleG /> Continuar con Google (pendiente de configuración)
-      </button>
-    );
+  if (!googleEnabled) return null;
   return (
-    <a className="btn btn-outline btn-block" href="/api/auth/google">
-      <GoogleG /> Continuar con Google
-    </a>
+    <>
+      <div className="divider">o</div>
+      <a className="btn btn-outline btn-block" href="/api/auth/google">
+        <GoogleG /> Continuar con Google
+      </a>
+    </>
   );
 }
 
@@ -102,7 +104,6 @@ export function LoginPage() {
           <Link to="/recuperar" className="text-accent" style={{ fontSize: 13 }}>¿Olvidaste tu contraseña?</Link>
         </div>
         <SubmitButton loading={form.submitting} className="btn btn-primary btn-lg btn-block">Iniciar sesión</SubmitButton>
-        <div className="divider">o</div>
         <GoogleButton />
         <p className="muted" style={{ textAlign: "center", fontSize: 14 }}>
           ¿No tienes una cuenta? <Link className="text-accent" to={`/registro${next !== "/cuenta" ? `?next=${encodeURIComponent(next)}` : ""}`}>Regístrate aquí</Link>
@@ -164,7 +165,6 @@ export function RegisterPage() {
           Acepto los <Link to="/terminos" className="text-accent" target="_blank">términos</Link> y la <Link to="/privacidad" className="text-accent" target="_blank">política de privacidad</Link>.
         </Check>
         <SubmitButton loading={form.submitting} className="btn btn-primary btn-lg btn-block">Crear cuenta</SubmitButton>
-        <div className="divider">o</div>
         <GoogleButton />
         <p className="muted" style={{ textAlign: "center", fontSize: 14 }}>
           ¿Ya tienes cuenta? <Link className="text-accent" to="/ingresar">Inicia sesión</Link>

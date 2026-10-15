@@ -82,8 +82,7 @@ export const wompi: PaymentAdapter = {
       "customer-data:email": order.buyerEmail,
       "customer-data:full-name": order.buyerName,
       "customer-data:phone-number": order.buyerPhone.replace(/\D/g, ""),
-      "customer-data:legal-id": order.buyerDocument,
-      "customer-data:legal-id-type": "CC",
+      ...(order.buyerDocument ? { "customer-data:legal-id": order.buyerDocument, "customer-data:legal-id-type": "CC" } : {}),
     });
     return { type: "redirect", url: `https://checkout.wompi.co/p/?${params}` };
   },

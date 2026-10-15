@@ -42,6 +42,8 @@ export interface ProductDetail extends ProductSummary {
   warrantyText: string;
   durationLabel: string;
   accountLabel: string;
+  /** Imágenes del producto (la primera es la principal). Vacía = arte generado. */
+  images: string[];
   categoryId: number;
   isActive: boolean;
   reviews: { id: number; rating: number; comment: string; author: string; createdAt: string }[];

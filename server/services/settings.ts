@@ -14,6 +14,10 @@ export const DEFAULT_CAMPAIGN: CampaignSettings = {
   promoTitle: "Ofertas de Navidad en todas las categorías",
   promoText: "Descuentos de temporada por tiempo limitado. Usa el cupón NAVIDAD10 y ahorra un 10% adicional.",
   snow: true,
+  heroImage: "",
+  authImage: "",
+  promoImage: "",
+  heroProducts: true,
 };
 
 export const DEFAULT_STORE: StoreSettings = {

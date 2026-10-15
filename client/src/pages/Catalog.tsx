@@ -5,6 +5,7 @@ import { CardSkeletons, Empty, ErrorState, Pagination, ProductArt } from "../com
 import { api, qs } from "../lib/api";
 import { useDocumentTitle, useQuery } from "../lib/hooks";
 import { useStore } from "../lib/state";
+import { backgroundFor } from "../lib/format";
 import type { Category, Paginated, ProductSummary } from "../../../shared/types";
 
 const PRICE_RANGES = [
@@ -210,7 +211,7 @@ export function CategoriesPage() {
       )}
       {store?.campaign.enabled && (
         <section className="section">
-          <div className="promo">
+          <div className={`promo${backgroundFor(store.campaign, "promo") ? " has-bg" : ""}`} style={backgroundFor(store.campaign, "promo") ? { ["--promo-bg" as string]: `url("${backgroundFor(store.campaign, "promo")}")` } : undefined}>
             <div>
               <h2>{store.campaign.promoTitle}</h2>
               <p>{store.campaign.promoText}</p>

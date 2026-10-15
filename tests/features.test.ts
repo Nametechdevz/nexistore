@@ -468,3 +468,83 @@ describe("recargas manuales desde el panel", () => {
     expect((await u.get("/api/account/wallet")).body.balance).toBe(p.price);
   });
 });
+
+describe("imágenes de producto", () => {
+  // PNG de 1×1 válido.
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+  it("el admin sube varias imágenes, se guardan en el producto y se sirven con caché", async () => {
+    const a = await adminClient();
+    const up1 = await a.post("/api/admin/media").set("content-type", "image/png").send(PNG);
+    const up2 = await a.post("/api/admin/media").set("content-type", "image/png").send(PNG);
+    expect(up1.status).toBe(201);
+    expect(up1.body.url).toMatch(/^\/media\/\d+-[a-f0-9]{16}\.png$/);
+
+    const img = await request(app).get(up1.body.url).buffer(true);
+    expect(img.status).toBe(200);
+    expect(img.headers["content-type"]).toBe("image/png");
+    expect(img.headers["cache-control"]).toContain("immutable");
+    expect(Buffer.compare(img.body as Buffer, PNG)).toBe(0);
+    // Token incorrecto o ruta inventada → 404.
+    expect((await request(app).get(up1.body.url.replace(/-[a-f0-9]{16}/, "-0000000000000000"))).status).toBe(404);
+
+    const cats = (await a.get("/api/admin/categories")).body.items;
+    const body = { name: "Producto con fotos", slug: "producto-con-fotos", categoryId: cats[0].id, description: "Producto con galería de imágenes", price: 15000, stock: 3, images: [up2.body.url, up1.body.url] };
+    const created = await a.post("/api/admin/products").send(body);
+    expect(created.status).toBe(201);
+    const pub = (await request(app).get("/api/catalog/products/producto-con-fotos")).body.product;
+    expect(pub.images).toEqual([up2.body.url, up1.body.url]);
+    expect(pub.imageUrl).toBe(up2.body.url);
+
+    // URLs no permitidas en la galería.
+    const bad = await a.put(`/api/admin/products/${created.body.id}`).send({ ...body, images: ["javascript:alert(1)"] });
+    expect(bad.status).toBe(422);
+  });
+
+  it("rechaza archivos que no son imágenes y usuarios que no son admin", async () => {
+    const a = await adminClient();
+    const svg = await a.post("/api/admin/media").set("content-type", "image/svg+xml").send(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'));
+    expect(svg.status).toBe(400);
+    const html = await a.post("/api/admin/media").set("content-type", "image/png").send(Buffer.from("<html><body>hola</body></html>"));
+    expect(html.status).toBe(400);
+    const u = await registered();
+    expect((await u.post("/api/admin/media").set("content-type", "image/png").send(PNG)).status).toBe(403);
+  });
+
+  it("borra solo las imágenes huérfanas antiguas", async () => {
+    const { cleanupMedia } = await import("../server/services/media.js");
+    const a = await adminClient();
+    const orphan = (await a.post("/api/admin/media").set("content-type", "image/png").send(PNG)).body.url as string;
+    const used = (await request(app).get("/api/catalog/products/producto-con-fotos")).body.product.images as string[];
+    await execute("UPDATE media SET created_at = UTC_TIMESTAMP() - INTERVAL 2 DAY");
+    await cleanupMedia();
+    expect((await request(app).get(orphan)).status).toBe(404);
+    for (const url of used) expect((await request(app).get(url)).status).toBe(200);
+  });
+});
+
+describe("checkout sin documento", () => {
+  it("permite comprar sin documento de identidad", async () => {
+    const u = await registered();
+    const p = await product("fit-app-pro");
+    await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
+    const r = await u.post("/api/checkout").send(checkoutBody("manual"));
+    expect(r.status).toBe(201);
+    expect(r.body.code).toMatch(/^NS-/);
+  });
+});
+
+describe("fondos de la campaña", () => {
+  it("guarda fondos propios y rechaza URLs no válidas", async () => {
+    const a = await adminClient();
+    const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const up = (await a.post("/api/admin/media").set("content-type", "image/png").send(PNG)).body.url as string;
+    const current = (await a.get("/api/admin/settings")).body.campaign;
+    await a.put("/api/admin/settings/campaign").send({ ...current, heroImage: up, heroProducts: false }).expect(200);
+    const pub = (await request(app).get("/api/catalog/store")).body;
+    expect(pub.campaign.heroImage).toBe(up);
+    expect(pub.campaign.heroProducts).toBe(false);
+    expect((await a.put("/api/admin/settings/campaign").send({ ...current, heroImage: "javascript:alert(1)" })).status).toBe(422);
+    await a.put("/api/admin/settings/campaign").send({ ...current, heroImage: "" }).expect(200);
+  });
+});

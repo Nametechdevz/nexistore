@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Icon } from "./Icon";
 import { discountPercent, formatCOP, ORDER_STATUS_LABEL } from "../lib/format";
@@ -393,5 +394,37 @@ export function QtyStepper({ value, onChange, max, min = 1, label }: { value: nu
         <Icon name="plus" />
       </button>
     </div>
+  );
+}
+
+/**
+ * Menú lateral (móvil/tablet). Se monta en <body> con un portal: si quedara dentro de la cabecera,
+ * su `backdrop-filter` encierra los elementos `position: fixed` y el menú se cortaría.
+ */
+export function Drawer({ open, onClose, label, children }: { open: boolean; onClose: () => void; label: string; children: ReactNode }) {
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panel.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+  if (!open) return null;
+  return createPortal(
+    <>
+      <div className="drawer-backdrop" onClick={onClose} />
+      <aside ref={panel} className="drawer" aria-label={label} aria-modal="true" role="dialog" tabIndex={-1}>
+        {children}
+      </aside>
+    </>,
+    document.body,
   );
 }

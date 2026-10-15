@@ -3,6 +3,7 @@ import { Icon } from "../components/Icon";
 import { ProductCard } from "../components/ProductCard";
 import { CardSkeletons, ErrorState, ProductArt } from "../components/ui";
 import { api } from "../lib/api";
+import { backgroundFor } from "../lib/format";
 import { useDocumentTitle, useQuery } from "../lib/hooks";
 import { useStore } from "../lib/state";
 import type { Category, ProductSummary } from "../../../shared/types";
@@ -50,10 +51,12 @@ export function HomePage() {
   const deals = useQuery(() => api.get<{ items: ProductSummary[] }>("/api/catalog/products?onSale=1&sort=discount&pageSize=6"));
   const heroProducts = popular.data?.items.slice(0, 5) ?? [];
   const seasonal = campaign?.enabled;
+  const heroBg = backgroundFor(campaign, "hero");
+  const promoBg = backgroundFor(campaign, "promo");
 
   return (
     <>
-      <section className="hero">
+      <section className={`hero${heroBg ? " has-bg" : ""}`} style={heroBg ? { ["--hero-bg" as string]: `url("${heroBg}")` } : undefined}>
         {seasonal && campaign?.snow && <div className="snow" />}
         <div className="container hero-inner">
           <div>
@@ -71,7 +74,7 @@ export function HomePage() {
               </Link>
             </div>
           </div>
-          <HeroVisual products={heroProducts} seal={seasonal ? { top: campaign.sealTop, value: campaign.sealValue, bottom: campaign.sealBottom } : undefined} />
+          <HeroVisual products={campaign?.heroProducts === false ? [] : heroProducts} seal={seasonal ? { top: campaign.sealTop, value: campaign.sealValue, bottom: campaign.sealBottom } : undefined} />
         </div>
       </section>
 
@@ -134,7 +137,7 @@ export function HomePage() {
 
         {seasonal && (
           <section className="section">
-            <div className="promo">
+            <div className={`promo${promoBg ? " has-bg" : ""}`} style={promoBg ? { ["--promo-bg" as string]: `url("${promoBg}")` } : undefined}>
               <div>
                 <h2>{campaign.promoTitle}</h2>
                 <p>{campaign.promoText}</p>

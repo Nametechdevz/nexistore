@@ -94,7 +94,6 @@ await c.getByText("Entrega automática al confirmarse el pago").waitFor();
 await c.getByRole("button", { name: "Agregar al carrito" }).click();
 await c.goto(`${BASE}/checkout`);
 await c.getByLabel("Celular").fill("3001234567");
-await c.getByLabel("Documento de identidad").fill("1020304050");
 await c.getByRole("button", { name: /Continuar/ }).click();
 await c.locator("label.pay-option", { hasText: "Billetera NexiStore" }).click();
 await c.locator("form label.check input").check();
@@ -174,6 +173,37 @@ await a.locator("tr", { hasText: "CinePlus Premium" }).getByRole("button", { nam
 await a.getByLabel("Entrega", { exact: true }).waitFor();
 await shot(a, "17-admin-producto-entrega");
 await a.keyboard.press("Escape");
+
+// Imágenes del producto: el admin sube dos fotos y el cliente ve la galería.
+await a.locator("tr", { hasText: "CinePlus Premium" }).getByRole("button", { name: /Editar/ }).click();
+const pngs = await a.evaluate(async () => {
+  const make = async (color) => {
+    const cv = document.createElement("canvas");
+    cv.width = 800;
+    cv.height = 800;
+    const g = cv.getContext("2d");
+    g.fillStyle = color;
+    g.fillRect(0, 0, 800, 800);
+    g.fillStyle = "#fff";
+    g.font = "bold 120px sans-serif";
+    g.fillText("NEXI", 220, 440);
+    return cv.toDataURL("image/png").split(",")[1];
+  };
+  return [await make("#e3122c"), await make("#2f7bff")];
+});
+await a.locator('.uploader input[type="file"], .field input[type="file"]').first().setInputFiles(
+  pngs.map((b64, i) => ({ name: `foto-${i + 1}.png`, mimeType: "image/png", buffer: Buffer.from(b64, "base64") })),
+);
+await a.locator(".up-item").nth(1).waitFor();
+await shot(a, "17b-admin-producto-imagenes");
+await a.getByRole("button", { name: "Guardar", exact: true }).click();
+await a.getByText("Producto guardado").waitFor();
+await c.goto(`${BASE}/producto/cineplus-premium-anual`);
+await c.locator(".gallery-thumbs button").nth(1).waitFor();
+if (!(await c.locator(".gallery-main img").getAttribute("src"))?.startsWith("/media/")) problems.push("la ficha no muestra la imagen subida");
+await c.locator(".gallery-thumbs button").nth(1).click();
+await shot(c, "17c-producto-galeria");
+step("Admin sube varias imágenes del producto y el cliente ve la galería");
 
 /* ---------- Móvil ---------- */
 const m = await (await browser.newContext(mobile)).newPage();

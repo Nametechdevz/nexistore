@@ -3,6 +3,9 @@
  * El cliente los usa para mostrar errores al instante; el servidor los vuelve a aplicar siempre.
  */
 import { z } from "zod";
+
+// Sin compilación dinámica (new Function): compatible con la política CSP estricta del sitio.
+z.config({ jitless: true });
 import { CART_MAX_QTY, ORDER_STATUSES, PAYMENT_PROVIDERS, TOPUP_PROVIDERS, WALLET_MAX_TOPUP, WALLET_MIN_TOPUP } from "./constants.js";
 
 const trimmed = (min: number, max: number, label: string) =>
@@ -114,7 +117,8 @@ export const checkoutSchema = z.object({
   buyerName: trimmed(3, 120, "El nombre"),
   buyerEmail: emailSchema,
   buyerPhone: phoneSchema,
-  buyerDocument: documentSchema,
+  // El documento ya no se pide en el checkout; se acepta vacío por compatibilidad.
+  buyerDocument: documentSchema.or(z.literal("")).optional().default(""),
   paymentProvider: z.enum(PAYMENT_PROVIDERS, { error: "Selecciona un método de pago." }),
   couponCode: couponCodeSchema.optional().or(z.literal("")),
   notes: z.string().trim().max(500).optional().default(""),
@@ -152,6 +156,13 @@ export const categoryInputSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
+export const MAX_PRODUCT_IMAGES = 8;
+export const imageRefSchema = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((v) => /^https:\/\/\S+$/.test(v) || /^\/media\/\d+-[a-f0-9]{16}\.(jpg|png|webp|gif)$/.test(v), "Imagen no válida.");
+
 export const productInputSchema = z
   .object({
     name: trimmed(2, 120, "El nombre"),
@@ -177,6 +188,8 @@ export const productInputSchema = z
       .max(500)
       .refine((v) => v === "" || /^https:\/\//.test(v) || v.startsWith("/"), "Usa una URL https o una ruta local.")
       .default(""),
+    /** Galería: imágenes subidas desde el panel (/media/…) o URLs https. La primera es la principal. */
+    images: z.array(imageRefSchema).max(MAX_PRODUCT_IMAGES, `Máximo ${MAX_PRODUCT_IMAGES} imágenes por producto.`).default([]),
     isFeatured: z.boolean().default(false),
     isActive: z.boolean().default(true),
     deliveryMode: z.enum(["manual", "auto"]).default("manual"),
@@ -237,6 +250,12 @@ export const campaignSchema = z.object({
   promoTitle: z.string().trim().max(80),
   promoText: z.string().trim().max(200),
   snow: z.boolean(),
+  /** Fondos propios subidos desde el panel. Vacío = ilustración navideña incluida (o fondo liso sin campaña). */
+  heroImage: imageRefSchema.or(z.literal("")).default(""),
+  authImage: imageRefSchema.or(z.literal("")).default(""),
+  promoImage: imageRefSchema.or(z.literal("")).default(""),
+  /** Mostrar las tarjetas flotantes de productos sobre el fondo de la portada. */
+  heroProducts: z.boolean().default(true),
 });
 
 export const storeSettingsSchema = z.object({

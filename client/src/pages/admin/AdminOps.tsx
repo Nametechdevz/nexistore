@@ -9,6 +9,7 @@ import { useSession, useToast } from "../../lib/state";
 import { OrdersTable } from "./AdminCatalog";
 import { CustomerWalletModal } from "./AdminExtra";
 import { IntegrationsSettings } from "./AdminIntegrations";
+import { ImageUploader } from "../../components/ImageUploader";
 import { ORDER_STATUSES, ORDER_TRANSITIONS, type OrderStatus } from "../../../../shared/constants";
 import { campaignSchema, couponInputSchema, postInputSchema, storeSettingsSchema } from "../../../../shared/schemas";
 import type { Order, PaymentMethodInfo } from "../../../../shared/types";
@@ -177,7 +178,7 @@ export function AdminOrderDetail() {
             <div className="panel-head"><h3>Cliente</h3></div>
             <p><strong>{o.buyerName}</strong></p>
             <p className="muted" style={{ fontSize: 14 }}>{o.buyerEmail} · {o.buyerPhone}</p>
-            <p className="muted" style={{ fontSize: 14 }}>Documento {o.buyerDocument}</p>
+            {o.buyerDocument && <p className="muted" style={{ fontSize: 14 }}>Documento {o.buyerDocument}</p>}
             {q.data.customer && <p className="hint" style={{ marginTop: 8 }}>Cuenta: {q.data.customer.email}</p>}
           </div>
           <div className="panel">
@@ -559,11 +560,11 @@ export function AdminSettings() {
   useEffect(() => {
     if (s.data) setRate(s.data.crypto.copPerUnit ? String(s.data.crypto.copPerUnit) : "");
   }, [s.data]);
-  const campaign = useForm(campaignSchema, { enabled: true, titleLead: "", titleAccent: "", subtitle: "", ctaLabel: "", ctaHref: "/promociones", sealTop: "", sealValue: "", sealBottom: "", promoTitle: "", promoText: "", snow: true });
+  const campaign = useForm(campaignSchema, { enabled: true, titleLead: "", titleAccent: "", subtitle: "", ctaLabel: "", ctaHref: "/promociones", sealTop: "", sealValue: "", sealBottom: "", promoTitle: "", promoText: "", snow: true, heroImage: "", authImage: "", promoImage: "", heroProducts: true });
   const store = useForm(storeSettingsSchema, { storeName: "", supportEmail: "", supportWhatsapp: "", manualPaymentInstructions: "" });
   useEffect(() => {
     if (s.data) {
-      campaign.setValues(s.data.campaign as never);
+      campaign.setValues({ heroImage: "", authImage: "", promoImage: "", heroProducts: true, ...s.data.campaign } as never);
       store.setValues(s.data.store as never);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -626,6 +627,16 @@ export function AdminSettings() {
           <div className="form-row">
             <TextField label="Banner: título" value={c.promoTitle} onValue={(v) => campaign.set("promoTitle", v)} maxLength={80} />
             <TextField label="Banner: texto" value={c.promoText} onValue={(v) => campaign.set("promoText", v)} maxLength={200} />
+          </div>
+          <div className="form-sep">
+            <h4>Imágenes de fondo</h4>
+            <p className="hint">Sube tus propias imágenes (por ejemplo, una foto navideña). Si las dejas vacías se usa la ilustración navideña incluida mientras la campaña esté activa. Se reducen y optimizan automáticamente.</p>
+          </div>
+          <ImageUploader label="Portada (inicio)" max={1} maxSide={2400} aspect="16 / 7" value={c.heroImage ? [c.heroImage] : []} onChange={(u) => campaign.set("heroImage", u[0] ?? "")} hint="Horizontal, ideal 1920 × 840 px. Deja el lado izquierdo despejado: ahí va el texto." />
+          <Check checked={c.heroProducts !== false} onChange={(v) => campaign.set("heroProducts", v)}>Mostrar tarjetas de productos sobre la portada</Check>
+          <div className="form-row">
+            <ImageUploader label="Inicio de sesión y registro" max={1} maxSide={1600} aspect="3 / 4" value={c.authImage ? [c.authImage] : []} onChange={(u) => campaign.set("authImage", u[0] ?? "")} hint="Vertical, ideal 900 × 1200 px." />
+            <ImageUploader label="Banner de ofertas" max={1} maxSide={2000} aspect="21 / 9" value={c.promoImage ? [c.promoImage] : []} onChange={(u) => campaign.set("promoImage", u[0] ?? "")} hint="Horizontal, ideal 1600 × 680 px." />
           </div>
           <div><SubmitButton loading={campaign.submitting}>Guardar campaña</SubmitButton></div>
         </form>

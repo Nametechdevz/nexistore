@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import express, { Router, type Response } from "express";
 import { z } from "zod";
 import { execute, query, queryOne, toBool, toIso } from "../db.js";
 import { ah, badRequest, conflict, HttpError, intParam, likeEscape, notFound, pageParams, parse } from "../lib/http.js";
@@ -8,6 +8,7 @@ import { changeStatus, getOrder, listOrders, setDelivery } from "../services/ord
 import { DEFAULT_CAMPAIGN, DEFAULT_CRYPTO, DEFAULT_STORE, getSetting, setSetting } from "../services/settings.js";
 import { detectedUrl, publicUrl, publicView, saveIntegrations } from "../services/integrations.js";
 import { testMail } from "../services/mailer.js";
+import { MAX_MEDIA_BYTES, saveMedia, sniffImage } from "../services/media.js";
 import { paymentMethods } from "../payments/index.js";
 import { ORDER_STATUSES } from "../../shared/constants.js";
 import {
@@ -35,6 +36,21 @@ function dup(e: any, field: string, msg: string): never {
   if (e?.code === "ER_DUP_ENTRY") throw conflict(msg, { [field]: msg });
   throw e;
 }
+
+/* ---------- Imágenes ---------- */
+
+// El cuerpo es el archivo tal cual (image/*). Se valida la firma real del archivo, no la extensión.
+adminRouter.post(
+  "/media",
+  express.raw({ type: () => true, limit: MAX_MEDIA_BYTES }),
+  ah(async (req, res) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!buf?.length) throw badRequest("No llegó ninguna imagen.");
+    if (!sniffImage(buf)) throw badRequest("Formato no admitido. Usa JPG, PNG, WebP o GIF.");
+    const media = await saveMedia(buf, req.user!.id);
+    res.status(201).json(media);
+  }),
+);
 
 /* ---------- Dashboard ---------- */
 
@@ -123,11 +139,15 @@ adminRouter.get(
   }),
 );
 
+/** Galería final: si solo llega imageUrl (versiones anteriores), se usa como única imagen. */
+const galleryOf = (d: z.infer<typeof productInputSchema>) => (d.images.length ? d.images : d.imageUrl ? [d.imageUrl] : []);
+
 function productParams(d: z.infer<typeof productInputSchema>) {
+  const images = galleryOf(d);
   return [
     d.name, d.slug, d.categoryId, d.summary, d.description, d.includesText, d.instructions, d.deliveryText, d.warrantyText,
     d.durationLabel, d.accountLabel, d.price, d.compareAtPrice || null, d.deliveryMode === "auto" ? 0 : d.stock, d.maxPerOrder, d.artGlyph, d.artColor,
-    d.imageUrl || null, d.isFeatured ? 1 : 0, d.isActive ? 1 : 0, d.deliveryMode, d.durationDays, d.lowStockThreshold,
+    images[0] ?? null, JSON.stringify(images), d.isFeatured ? 1 : 0, d.isActive ? 1 : 0, d.deliveryMode, d.durationDays, d.lowStockThreshold,
   ];
 }
 
@@ -145,8 +165,8 @@ adminRouter.post(
     const r = await execute(
       `INSERT INTO products (name, slug, category_id, summary, description, includes_text, instructions, delivery_text, warranty_text,
                              duration_label, account_label, price, compare_at_price, stock, max_per_order, art_glyph, art_color,
-                             image_url, is_featured, is_active, delivery_mode, duration_days, low_stock_threshold)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             image_url, gallery, is_featured, is_active, delivery_mode, duration_days, low_stock_threshold)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       productParams(d),
     ).catch((e) => dup(e, "slug", "Ya existe un producto con ese slug."));
     res.status(201).json({ id: r.insertId });
@@ -162,7 +182,7 @@ adminRouter.put(
     const r = await execute(
       `UPDATE products SET name = ?, slug = ?, category_id = ?, summary = ?, description = ?, includes_text = ?, instructions = ?,
               delivery_text = ?, warranty_text = ?, duration_label = ?, account_label = ?, price = ?, compare_at_price = ?, stock = ?,
-              max_per_order = ?, art_glyph = ?, art_color = ?, image_url = ?, is_featured = ?, is_active = ?,
+              max_per_order = ?, art_glyph = ?, art_color = ?, image_url = ?, gallery = ?, is_featured = ?, is_active = ?,
               delivery_mode = ?, duration_days = ?, low_stock_threshold = ?
         WHERE id = ?`,
       [...productParams(d), id],

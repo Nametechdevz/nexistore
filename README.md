@@ -111,6 +111,12 @@ Hay una campana en la tienda y otra en el panel. Las alertas importantes tambié
 | Vencidas | — | Se marcan solas y salen del stock |
 | Cuenta caída / reemplazada / reembolsos / respuestas de soporte | Cliente o admin | Al ocurrir |
 
+## Imágenes
+
+- **Productos:** en *Admin → Productos → Editar* se suben hasta 8 imágenes (JPG, PNG, WebP o GIF), con arrastrar y soltar. La primera es la principal y las flechas cambian el orden. La ficha del producto muestra la galería. Sin imágenes se usa el arte generado con el monograma y el color.
+- **Fondos de la tienda:** en *Admin → Configuración → Campaña de temporada* se suben los fondos de la portada, del inicio de sesión y del banner de ofertas. Si quedan vacíos y la campaña está activa, se usa la ilustración navideña incluida (`client/public/art/navidad.jpg`).
+- El navegador reduce cada imagen (máx. 1600–2400 px) y la convierte a WebP antes de subirla; así se eliminan los metadatos. El servidor comprueba la firma real del archivo y no admite SVG. Las imágenes se guardan **en la base de datos** (tabla `media`), así que no se pierden al subir un ZIP nuevo, y se sirven en `/media/…` con caché de un año. Cada hora se borran las que ya no usa ningún producto ni fondo.
+
 ## Pagos
 
 Ningún pago se simula. Un pedido pasa a **Pagado** solo de dos formas:

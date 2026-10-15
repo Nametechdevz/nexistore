@@ -398,7 +398,7 @@ export function OrderDetailPage() {
             <div className="panel-head"><h3>Datos del comprador</h3></div>
             <p style={{ fontSize: 14 }}>{o.buyerName}</p>
             <p className="muted" style={{ fontSize: 14 }}>{o.buyerEmail} · {o.buyerPhone}</p>
-            <p className="muted" style={{ fontSize: 14 }}>Documento: {o.buyerDocument}</p>
+            {o.buyerDocument && <p className="muted" style={{ fontSize: 14 }}>Documento: {o.buyerDocument}</p>}
             <Link className="btn btn-outline btn-sm" style={{ marginTop: 16 }} to={`/cuenta/soporte?pedido=${o.code}`}><Icon name="headphones" /> ¿Necesitas ayuda con este pedido?</Link>
           </div>
         </div>

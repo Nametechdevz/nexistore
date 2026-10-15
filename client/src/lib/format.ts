@@ -31,3 +31,17 @@ export const slugify = (s: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 120);
+
+/** Ilustración navideña incluida (se usa mientras la campaña esté activa y no haya un fondo propio). */
+export const SEASON_ART = "/art/navidad.jpg";
+
+/** Fondo de una zona de la tienda: el subido en el panel o, con campaña activa, la ilustración incluida. */
+export function backgroundFor(
+  campaign: { enabled: boolean; heroImage?: string; authImage?: string; promoImage?: string } | undefined,
+  zone: "hero" | "auth" | "promo",
+): string | null {
+  if (!campaign) return null;
+  const own = zone === "hero" ? campaign.heroImage : zone === "auth" ? campaign.authImage : campaign.promoImage;
+  if (own) return own;
+  return campaign.enabled ? SEASON_ART : null;
+}

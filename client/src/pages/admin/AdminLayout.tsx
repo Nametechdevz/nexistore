@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/Icon";
 import { NotificationBell } from "../../components/Notifications";
-import { Empty, Logo, Spinner } from "../../components/ui";
+import { Drawer, Empty, Logo, Spinner } from "../../components/ui";
 import { useSession } from "../../lib/state";
 
 const ITEMS = [
@@ -25,6 +25,7 @@ export function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [drawer, setDrawer] = useState(false);
+  const closeDrawer = useCallback(() => setDrawer(false), []);
   useEffect(() => {
     setDrawer(false);
   }, [location.pathname]);
@@ -85,15 +86,15 @@ export function AdminLayout() {
           <Outlet />
         </main>
       </div>
-      {drawer && (
-        <>
-          <div className="drawer-backdrop" onClick={() => setDrawer(false)} />
-          <aside className="drawer" aria-label="Menú de administración">
-            <Logo to="/admin" sub="PANEL ADMIN" />
-            <nav className="dash-nav" style={{ display: "grid", position: "static" }}>{nav}</nav>
-          </aside>
-        </>
-      )}
+      <Drawer open={drawer} onClose={closeDrawer} label="Menú de administración">
+        <div className="drawer-head">
+          <Logo to="/admin" sub="PANEL ADMIN" />
+          <button className="icon-btn" onClick={closeDrawer} aria-label="Cerrar menú">
+            <Icon name="x" />
+          </button>
+        </div>
+        <nav className="dash-nav" style={{ display: "grid", position: "static" }}>{nav}</nav>
+      </Drawer>
     </>
   );
 }

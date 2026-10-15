@@ -58,7 +58,6 @@ export const checkoutBody = (provider = "manual", extra: Record<string, unknown>
   buyerName: "Cliente Prueba",
   buyerEmail: "cliente@test.co",
   buyerPhone: "3001234567",
-  buyerDocument: "1020304050",
   paymentProvider: provider,
   acceptTerms: true,
   ...extra,
