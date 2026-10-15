@@ -7,6 +7,7 @@ import { formatCOP, formatDate, formatDateTime, ORDER_STATUS_LABEL, PROVIDER_LAB
 import { useDebounced, useDocumentTitle, useForm, useQuery } from "../../lib/hooks";
 import { useSession, useToast } from "../../lib/state";
 import { OrdersTable } from "./AdminCatalog";
+import { CustomerWalletModal } from "./AdminExtra";
 import { ORDER_STATUSES, ORDER_TRANSITIONS, type OrderStatus } from "../../../../shared/constants";
 import { campaignSchema, couponInputSchema, postInputSchema, storeSettingsSchema } from "../../../../shared/schemas";
 import type { Order, PaymentMethodInfo } from "../../../../shared/types";
@@ -58,11 +59,12 @@ export function AdminOrderDetail() {
   const q = useQuery(() => api.get<AdminOrderDetail>(`/api/admin/orders/${encodeURIComponent(code)}`), [code]);
   const [target, setTarget] = useState<OrderStatus | null>(null);
   const [note, setNote] = useState("");
+  const [refundToWallet, setRefundToWallet] = useState(true);
   const [busy, setBusy] = useState(false);
   const [delivery, setDelivery] = useState<Record<number, string>>({});
 
   useEffect(() => {
-    if (q.data) setDelivery(Object.fromEntries(q.data.order.items.map((i) => [i.id, i.deliveryContent ?? ""])));
+    if (q.data) setDelivery(Object.fromEntries(q.data.order.items.filter((i) => i.deliveryMode !== "auto").map((i) => [i.id, i.deliveryContent ?? ""])));
   }, [q.data]);
 
   if (q.error) return <ErrorState message={q.error.message} onRetry={q.reload} />;
@@ -75,7 +77,7 @@ export function AdminOrderDetail() {
     if (!target) return;
     setBusy(true);
     try {
-      await api.post(`/api/admin/orders/${o.code}/status`, { status: target, note });
+      await api.post(`/api/admin/orders/${o.code}/status`, { status: target, note, refundToWallet: target === "refunded" && refundToWallet });
       toast("success", `Pedido actualizado a «${ORDER_STATUS_LABEL[target]}».`);
       setTarget(null);
       setNote("");
@@ -136,8 +138,25 @@ export function AdminOrderDetail() {
                 <div style={{ flex: 1 }}><strong>{it.productName}</strong><div className="faint" style={{ fontSize: 12 }}>{it.quantity} × {formatCOP(it.unitPrice)}</div></div>
                 <strong className="num">{formatCOP(it.unitPrice * it.quantity)}</strong>
               </div>
-              <textarea className="textarea" rows={3} placeholder="Credenciales, códigos o instrucciones de entrega (solo visibles para el cliente cuando el pedido esté completado)" disabled={!canDeliver}
-                value={delivery[it.id] ?? ""} onChange={(e) => setDelivery((d) => ({ ...d, [it.id]: e.target.value }))} maxLength={4000} aria-label={`Entrega de ${it.productName}`} />
+              {it.deliveryMode === "auto" ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <span className="hint"><Icon name="key" size={12} style={{ display: "inline", verticalAlign: -1 }} /> Entrega automática desde inventario.</span>
+                  {it.deliveries.length === 0 && <span className="faint" style={{ fontSize: 13 }}>{o.status === "pending_payment" ? "Cuenta reservada: se entrega al confirmarse el pago." : "Sin cuentas entregadas."}</span>}
+                  {it.deliveries.map((d) => (
+                    <div key={d.id} className={`delivery-card${d.status === "fallen" ? " is-fallen" : ""}`}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                        <span className={`status status-${d.status}`}>{d.status === "sold" ? "Entregada" : d.status === "fallen" ? "Caída" : "Vencida"}</span>
+                        <span className="faint" style={{ fontSize: 12 }}>Servicio hasta {formatDate(d.serviceEndsAt)}</span>
+                      </div>
+                      {d.content && <div className="delivery-box">{d.content}</div>}
+                    </div>
+                  ))}
+                  <Link className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} to={`/admin/inventario?q=${o.code}`}>Ver en inventario</Link>
+                </div>
+              ) : (
+                <textarea className="textarea" rows={3} placeholder="Credenciales, códigos o instrucciones de entrega (solo visibles para el cliente cuando el pedido esté completado)" disabled={!canDeliver}
+                  value={delivery[it.id] ?? ""} onChange={(e) => setDelivery((d) => ({ ...d, [it.id]: e.target.value }))} maxLength={4000} aria-label={`Entrega de ${it.productName}`} />
+              )}
             </div>
           ))}
           <div style={{ marginTop: 12 }}>
@@ -187,6 +206,12 @@ export function AdminOrderDetail() {
         footer={<><button className="btn btn-ghost" onClick={() => setTarget(null)}>Volver</button><button className="btn btn-primary" onClick={changeStatus} disabled={busy}>{busy && <Spinner />} Confirmar</button></>}>
         {target === "paid" && <div style={{ marginBottom: 12 }}><Alert kind="warning">Confirma solo si verificaste que el dinero llegó a tu cuenta por el valor exacto: {formatCOP(o.total)}.</Alert></div>}
         {target === "cancelled" && <div style={{ marginBottom: 12 }}><Alert kind="info">El inventario reservado volverá a estar disponible.</Alert></div>}
+        {target === "refunded" && (
+          <div style={{ marginBottom: 12 }}>
+            <Check checked={refundToWallet} onChange={setRefundToWallet}>Reembolsar {formatCOP(o.total)} a la billetera del cliente</Check>
+            {!refundToWallet && <p className="hint" style={{ marginTop: 6 }}>Solo se registra el estado: devuelve el dinero por fuera de la tienda (pasarela o transferencia).</p>}
+          </div>
+        )}
         <TextArea label="Nota para el historial (visible para el cliente)" value={note} onValue={setNote} rows={3} maxLength={500} />
       </Modal>
     </>
@@ -195,7 +220,7 @@ export function AdminOrderDetail() {
 
 /* ================= Clientes ================= */
 
-interface Customer { id: number; name: string; email: string; phone: string | null; role: "customer" | "admin"; isActive: boolean; createdAt: string; orders: number; spent: number }
+interface Customer { id: number; name: string; email: string; phone: string | null; role: "customer" | "admin"; isActive: boolean; createdAt: string; orders: number; spent: number; walletBalance: number }
 
 export function AdminCustomers() {
   useDocumentTitle("Clientes");
@@ -206,6 +231,7 @@ export function AdminCustomers() {
   const q = useDebounced(search, 300);
   const list = useQuery(() => api.get<{ items: Customer[]; total: number; pageSize: number }>(`/api/admin/customers${qs({ q, page })}`), [q, page]);
   const [confirm, setConfirm] = useState<{ c: Customer; patch: Partial<Customer>; text: string } | null>(null);
+  const [walletOf, setWalletOf] = useState<Customer | null>(null);
 
   return (
     <>
@@ -220,7 +246,7 @@ export function AdminCustomers() {
         {list.error ? <ErrorState message={list.error.message} onRetry={list.reload} /> : list.loading && !list.data ? <Skeleton h={300} /> : !list.data?.items.length ? <Empty icon="users" title="Sin resultados" /> : (
           <div className="table-wrap">
             <table className="table responsive">
-              <thead><tr><th>Cliente</th><th>Registro</th><th>Pedidos</th><th className="t-right">Compras</th><th>Rol</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Cliente</th><th>Registro</th><th>Pedidos</th><th className="t-right">Compras</th><th className="t-right">Billetera</th><th>Rol</th><th>Estado</th></tr></thead>
               <tbody>
                 {list.data.items.map((c) => (
                   <tr key={c.id}>
@@ -228,6 +254,7 @@ export function AdminCustomers() {
                     <td className="muted">{formatDate(c.createdAt)}</td>
                     <td className="num">{c.orders}</td>
                     <td className="t-right num t-strong">{formatCOP(c.spent)}</td>
+                    <td className="t-right"><button className="btn btn-ghost btn-sm num" onClick={() => setWalletOf(c)}><Icon name="wallet" /> {formatCOP(c.walletBalance)}</button></td>
                     <td>
                       <select className="select" style={{ height: 34, width: "auto" }} value={c.role} disabled={c.id === user?.id} aria-label={`Rol de ${c.name}`}
                         onChange={(e) => setConfirm({ c, patch: { role: e.target.value as Customer["role"] }, text: e.target.value === "admin" ? `${c.name} tendrá acceso total al panel administrativo.` : `${c.name} perderá el acceso al panel.` })}>
@@ -249,6 +276,7 @@ export function AdminCustomers() {
         )}
       </div>
       {list.data && <Pagination page={page} pageSize={list.data.pageSize} total={list.data.total} onPage={setPage} />}
+      {walletOf && <CustomerWalletModal customer={walletOf} onClose={() => { setWalletOf(null); void list.reload(); }} />}
       <ConfirmModal open={confirm !== null} title="Confirmar cambio" text={confirm?.text ?? ""} onClose={() => setConfirm(null)}
         onConfirm={async () => {
           try {
@@ -445,67 +473,6 @@ export function AdminContent() {
   );
 }
 
-/* ================= Soporte ================= */
-
-interface Ticket { id: number; subject: string; message: string; orderCode: string | null; status: "open" | "answered" | "closed"; adminReply: string | null; createdAt: string; customer: { name: string; email: string } }
-
-export function AdminTickets() {
-  useDocumentTitle("Soporte");
-  const toast = useToast();
-  const [status, setStatus] = useState("open");
-  const list = useQuery(() => api.get<{ items: Ticket[] }>(`/api/admin/tickets${qs({ status })}`), [status]);
-  const [replying, setReplying] = useState<Ticket | null>(null);
-  const [reply, setReply] = useState("");
-  const [next, setNext] = useState<Ticket["status"]>("answered");
-  const [busy, setBusy] = useState(false);
-  const LABEL = { open: "Abierta", answered: "Respondida", closed: "Cerrada" };
-
-  return (
-    <>
-      <div className="dash-head"><div><h1 className="dash-title">Soporte</h1><p className="eyebrow">Solicitudes de los clientes.</p></div></div>
-      <div className="tabs" style={{ marginBottom: 16 }}>
-        {(["open", "answered", "closed", ""] as const).map((s) => (
-          <button key={s || "all"} className="tab" aria-selected={status === s} onClick={() => setStatus(s)}>{s ? LABEL[s] : "Todas"}</button>
-        ))}
-      </div>
-      {list.error ? <ErrorState message={list.error.message} onRetry={list.reload} /> : list.loading ? <Skeleton h={200} /> : !list.data?.items.length ? <Empty icon="headphones" title="No hay solicitudes aquí" /> : (
-        <div className="order-list">
-          {list.data.items.map((t) => (
-            <div key={t.id} className="order-card">
-              <div className="order-card-head">
-                <div><strong>{t.subject}</strong><p className="faint" style={{ fontSize: 12 }}>{t.customer.name} · {t.customer.email} · {formatDateTime(t.createdAt)}{t.orderCode && <> · <Link className="text-accent" to={`/admin/pedidos/${t.orderCode}`}>{t.orderCode}</Link></>}</p></div>
-                <span className={`status ${t.status === "open" ? "status-pending_payment" : t.status === "answered" ? "status-completed" : "status-neutral"}`}>{LABEL[t.status]}</span>
-              </div>
-              <p className="prose" style={{ fontSize: 14 }}>{t.message}</p>
-              {t.adminReply && <div className="alert alert-info"><Icon name="headphones" /><div className="prose">{t.adminReply}</div></div>}
-              <div><button className="btn btn-soft btn-sm" onClick={() => { setReplying(t); setReply(t.adminReply ?? ""); setNext("answered"); }}>{t.adminReply ? "Editar respuesta" : "Responder"}</button></div>
-            </div>
-          ))}
-        </div>
-      )}
-      <Modal open={replying !== null} title={`Responder: ${replying?.subject ?? ""}`} onClose={() => setReplying(null)}
-        footer={<><button className="btn btn-ghost" onClick={() => setReplying(null)}>Cancelar</button><button className="btn btn-primary" disabled={busy || reply.trim().length < 2} onClick={async () => {
-          setBusy(true);
-          try {
-            await api.post(`/api/admin/tickets/${replying!.id}/reply`, { reply, status: next });
-            toast("success", "Respuesta enviada.");
-            setReplying(null);
-            void list.reload();
-          } catch (e) {
-            toast("error", e instanceof ApiError ? e.message : "Error");
-          } finally {
-            setBusy(false);
-          }
-        }}>{busy && <Spinner />} Enviar</button></>}>
-        <div className="form">
-          <TextArea label="Respuesta" value={reply} onValue={setReply} rows={6} maxLength={4000} />
-          <SelectField label="Estado" value={next} onValue={(v) => setNext(v as Ticket["status"])} options={[{ value: "answered", label: "Respondida" }, { value: "closed", label: "Cerrada" }, { value: "open", label: "Abierta" }]} />
-        </div>
-      </Modal>
-    </>
-  );
-}
-
 /* ================= Reportes ================= */
 
 interface Report {
@@ -584,7 +551,12 @@ export function AdminReports() {
 export function AdminSettings() {
   useDocumentTitle("Configuración");
   const toast = useToast();
-  const s = useQuery(() => api.get<{ campaign: Record<string, unknown>; store: Record<string, unknown>; paymentMethods: PaymentMethodInfo[] }>("/api/admin/settings"));
+  const s = useQuery(() => api.get<{ campaign: Record<string, unknown>; store: Record<string, unknown>; crypto: { copPerUsdt: number | null }; paymentMethods: PaymentMethodInfo[] }>("/api/admin/settings"));
+  const [rate, setRate] = useState("");
+  const [savingRate, setSavingRate] = useState(false);
+  useEffect(() => {
+    if (s.data) setRate(s.data.crypto.copPerUsdt ? String(s.data.crypto.copPerUsdt) : "");
+  }, [s.data]);
   const campaign = useForm(campaignSchema, { enabled: true, titleLead: "", titleAccent: "", subtitle: "", ctaLabel: "", ctaHref: "/promociones", sealTop: "", sealValue: "", sealBottom: "", promoTitle: "", promoText: "", snow: true });
   const store = useForm(storeSettingsSchema, { storeName: "", supportEmail: "", supportWhatsapp: "", manualPaymentInstructions: "" });
   useEffect(() => {
@@ -613,6 +585,29 @@ export function AdminSettings() {
               <span className={`status ${m.configured ? "status-completed" : "status-pending_payment"}`}>{m.configured ? "Activa" : "Pendiente de configuración"}</span>
             </div>
           ))}
+        </div>
+      </div>
+      <div className="panel">
+        <div className="panel-head"><h3>Criptomonedas (Binance Pay)</h3></div>
+        <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
+          Binance Pay no cobra en pesos: cada pedido se cotiza en USDT con esta tasa y se guarda en el pedido. Actualízala con la frecuencia que necesites; los pedidos ya creados conservan su cotización.
+        </p>
+        <div className="form-row" style={{ alignItems: "end" }}>
+          <TextField label="Pesos colombianos por 1 USDT" inputMode="decimal" value={rate} onValue={(v) => setRate(v.replace(/[^\d.]/g, ""))} placeholder="Ej.: 4100" hint="Vacío = cripto deshabilitado." />
+          <div>
+            <button className="btn btn-primary" disabled={savingRate} onClick={async () => {
+              setSavingRate(true);
+              try {
+                await api.put("/api/admin/settings/crypto", { copPerUsdt: rate ? Number(rate) : null });
+                toast("success", "Tasa guardada.");
+                void s.reload();
+              } catch (e) {
+                toast("error", e instanceof ApiError ? e.message : "Error");
+              } finally {
+                setSavingRate(false);
+              }
+            }}>{savingRate && <Spinner />} Guardar tasa</button>
+          </div>
         </div>
       </div>
       <div className="panel">

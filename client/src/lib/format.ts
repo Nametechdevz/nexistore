@@ -11,6 +11,8 @@ export const PROVIDER_LABEL: Record<string, string> = {
   mercadopago: "Mercado Pago",
   wompi: "Wompi",
   manual: "Transferencia",
+  binance: "Binance Pay",
+  wallet: "Billetera",
 };
 
 export const initials = (name: string) =>

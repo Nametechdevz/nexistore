@@ -2,13 +2,14 @@ import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Icon } from "../../components/Icon";
 import {
-  Alert, Check, ConfirmModal, Empty, ErrorState, Modal, Pagination, ProductArt, Skeleton, Spinner, StatusBadge, Stars, SubmitButton, TextArea, TextField,
+  Alert, Check, ConfirmModal, Empty, ErrorState, Modal, Pagination, ProductArt, Skeleton, Spinner, StatusBadge, Stars, SubmitButton, TextField,
 } from "../../components/ui";
 import { api, ApiError } from "../../lib/api";
 import { formatCOP, formatDate, formatDateTime, ORDER_STATUS_LABEL, PROVIDER_LABEL } from "../../lib/format";
 import { useDocumentTitle, useForm, useQuery } from "../../lib/hooks";
 import { useSession, useStore, useToast } from "../../lib/state";
-import { addressSchema, changePasswordSchema, profileSchema, ticketSchema } from "../../../../shared/schemas";
+import { addressSchema, changePasswordSchema, profileSchema } from "../../../../shared/schemas";
+import { ReportIssueModal, ServiceEnds } from "./AccountExtra";
 import type { Order } from "../../../../shared/types";
 
 interface OrdersResponse {
@@ -54,6 +55,7 @@ export function AccountOverview() {
   useDocumentTitle("Mi cuenta");
   const { user } = useSession();
   const orders = useQuery(() => api.get<OrdersResponse>("/api/orders?filter=todos"));
+  const summary = useQuery(() => api.get<{ wallet: number }>("/api/account/summary"));
   const c = orders.data?.counts;
   return (
     <>
@@ -70,6 +72,7 @@ export function AccountOverview() {
         <div className="stat"><span className="stat-icon"><Icon name="package" /></span><div><strong>{c?.total ?? "–"}</strong><span>Pedidos totales</span></div></div>
         <div className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--success)" }}><Icon name="check" /></span><div><strong>{c?.completed ?? "–"}</strong><span>Completados</span></div></div>
         <div className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--warning)" }}><Icon name="clock" /></span><div><strong>{c?.pending ?? "–"}</strong><span>En curso</span></div></div>
+        <Link to="/cuenta/billetera" className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--info)" }}><Icon name="wallet" /></span><div><strong className="num">{summary.data ? formatCOP(summary.data.wallet) : "–"}</strong><span>Saldo en billetera</span></div></Link>
       </div>
       <div className="panel">
         <div className="panel-head">
@@ -207,6 +210,7 @@ export function OrderDetailPage() {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reviewing, setReviewing] = useState<number | null>(null);
+  const [reporting, setReporting] = useState<{ itemId: number; inventoryItemId?: number; productName: string } | null>(null);
 
   if (q.error?.status === 404) return <Empty icon="search" title="Pedido no encontrado" action={<Link className="btn btn-primary" to="/cuenta/pedidos">Ver mis pedidos</Link>} />;
   if (q.error) return <ErrorState message={q.error.message} onRetry={q.reload} />;
@@ -286,9 +290,46 @@ export function OrderDetailPage() {
                   <div style={{ marginTop: 10 }}>
                     <p className="label" style={{ marginBottom: 6 }}>Datos de entrega</p>
                     <div className="delivery-box">{it.deliveryContent}</div>
-                    <button className="btn btn-ghost btn-sm" style={{ marginTop: 6 }} onClick={() => { void navigator.clipboard?.writeText(it.deliveryContent ?? ""); toast("success", "Copiado al portapapeles."); }}>
-                      <Icon name="copy" /> Copiar
-                    </button>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => { void navigator.clipboard?.writeText(it.deliveryContent ?? ""); toast("success", "Copiado al portapapeles."); }}>
+                        <Icon name="copy" /> Copiar
+                      </button>
+                      {o.status === "completed" && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => setReporting({ itemId: it.id, productName: it.productName })}>
+                          <Icon name="alert" /> Reportar falla
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {it.deliveries.length > 0 && o.status === "completed" && (
+                  <div style={{ marginTop: 10 }}>
+                    <p className="label">{it.deliveries.filter((d) => d.status === "sold").length > 1 ? "Tus cuentas" : "Tu cuenta"}</p>
+                    {it.deliveries.map((d) => (
+                      <div key={d.id} className={`delivery-card${d.status === "fallen" ? " is-fallen" : ""}`}>
+                        {d.status === "fallen" ? (
+                          <span className="faint" style={{ fontSize: 13 }}><Icon name="refresh" size={13} style={{ display: "inline", verticalAlign: -2 }} /> Cuenta anterior dada de baja por falla.</span>
+                        ) : (
+                          <>
+                            <div className="delivery-box">{d.content}</div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+                              <ServiceEnds iso={d.serviceEndsAt} />
+                              <span style={{ display: "flex", gap: 4 }}>
+                                <button className="btn btn-ghost btn-sm" onClick={() => { void navigator.clipboard?.writeText(d.content ?? ""); toast("success", "Copiado al portapapeles."); }}>
+                                  <Icon name="copy" /> Copiar
+                                </button>
+                                {d.status === "sold" && (
+                                  <button className="btn btn-ghost btn-sm" onClick={() => setReporting({ itemId: it.id, inventoryItemId: d.id, productName: it.productName })}>
+                                    <Icon name="alert" /> Reportar falla
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                            {d.status === "expired" && <span className="chip-warn" style={{ color: "#ff6b6b" }}>Servicio vencido</span>}
+                          </>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
                 {o.status === "completed" && it.productId && !q.data!.reviewedProductIds.includes(it.productId) && (
@@ -336,6 +377,22 @@ export function OrderDetailPage() {
                 })}
               </div>
             )}
+            {(() => {
+              const extra = (o.events ?? []).filter((e) => !(TIMELINE as readonly string[]).includes(e.status) && !["cancelled", "refunded"].includes(e.status));
+              return extra.length ? (
+                <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                  <p className="label" style={{ marginBottom: 8 }}>Novedades</p>
+                  <ul style={{ display: "grid", gap: 8 }}>
+                    {extra.map((e, i) => (
+                      <li key={i} style={{ fontSize: 13 }}>
+                        <span className="muted">{e.note}</span>
+                        <span className="faint" style={{ display: "block", fontSize: 11 }}>{formatDateTime(e.createdAt)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null;
+            })()}
           </div>
           <div className="panel">
             <div className="panel-head"><h3>Datos del comprador</h3></div>
@@ -346,6 +403,9 @@ export function OrderDetailPage() {
           </div>
         </div>
       </div>
+      {reporting && (
+        <ReportIssueModal open onClose={() => setReporting(null)} orderCode={o.code} orderItemId={reporting.itemId} inventoryItemId={reporting.inventoryItemId} productName={reporting.productName} />
+      )}
       <ConfirmModal open={confirmCancel} title="Cancelar pedido" text="El pedido se cancelará y los productos volverán a estar disponibles. Si ya realizaste un pago, contacta a soporte en lugar de cancelar." confirmLabel="Sí, cancelar" danger busy={busy} onConfirm={cancel} onClose={() => setConfirmCancel(false)} />
     </>
   );
@@ -570,62 +630,6 @@ export function CouponsPage() {
           ))}
         </div>
       )}
-    </>
-  );
-}
-
-export function SupportPage() {
-  useDocumentTitle("Soporte");
-  const toast = useToast();
-  const [params] = useSearchParams();
-  const tickets = useQuery(() => api.get<{ items: { id: number; subject: string; message: string; orderCode: string | null; status: string; adminReply: string | null; createdAt: string }[] }>("/api/account/tickets"));
-  const form = useForm(ticketSchema, { subject: params.get("pedido") ? `Ayuda con el pedido ${params.get("pedido")}` : "", message: "", orderCode: params.get("pedido") ?? "" });
-  const STATUS: Record<string, string> = { open: "Abierta", answered: "Respondida", closed: "Cerrada" };
-
-  return (
-    <>
-      <div className="dash-head"><div><h1 className="dash-title">Soporte</h1><p className="eyebrow">Escríbenos y te responderemos en tu panel.</p></div></div>
-      <div className="split">
-        <div className="panel">
-          <div className="panel-head"><h3>Mis solicitudes</h3></div>
-          {tickets.error ? <ErrorState message={tickets.error.message} onRetry={tickets.reload} /> : tickets.loading ? <Skeleton h={80} /> : !tickets.data?.items.length ? (
-            <p className="muted" style={{ fontSize: 14 }}>Aún no has creado solicitudes.</p>
-          ) : (
-            <div className="order-list">
-              {tickets.data.items.map((t) => (
-                <div key={t.id} className="order-card" style={{ background: "var(--bg-elev)" }}>
-                  <div className="order-card-head">
-                    <strong>{t.subject}</strong>
-                    <span className={`status ${t.status === "answered" ? "status-completed" : t.status === "open" ? "status-pending_payment" : "status-neutral"}`}>{STATUS[t.status]}</span>
-                  </div>
-                  <p className="muted prose" style={{ fontSize: 14 }}>{t.message}</p>
-                  {t.adminReply && <div className="alert alert-info"><Icon name="headphones" /><div><strong>Respuesta de NexiStore</strong><p className="prose">{t.adminReply}</p></div></div>}
-                  <span className="faint" style={{ fontSize: 12 }}>{formatDateTime(t.createdAt)}{t.orderCode && ` · Pedido ${t.orderCode}`}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="panel">
-          <div className="panel-head"><h3>Nueva solicitud</h3></div>
-          <form
-            className="form"
-            noValidate
-            onSubmit={form.submit(async (d) => {
-              await api.post("/api/account/tickets", d);
-              toast("success", "Solicitud enviada. Te responderemos pronto.");
-              form.setValues({ subject: "", message: "", orderCode: "" });
-              await tickets.reload();
-            })}
-          >
-            {form.formError && <Alert kind="error">{form.formError}</Alert>}
-            <TextField label="Asunto" value={form.values.subject} onValue={(v) => form.set("subject", v)} error={form.errors.subject} maxLength={140} />
-            <TextField label="Código del pedido (opcional)" value={form.values.orderCode ?? ""} onValue={(v) => form.set("orderCode", v.toUpperCase())} error={form.errors.orderCode} placeholder="NS-20261015-ABC123" />
-            <TextArea label="Mensaje" value={form.values.message} onValue={(v) => form.set("message", v)} error={form.errors.message} rows={5} maxLength={4000} />
-            <div><SubmitButton loading={form.submitting}>Enviar solicitud</SubmitButton></div>
-          </form>
-        </div>
-      </div>
     </>
   );
 }

@@ -134,7 +134,7 @@ export function ProductPage() {
               </li>
             )}
             <li>
-              <Icon name="zap" /> Entrega digital en tu panel
+              <Icon name="zap" /> {p.deliveryMode === "auto" ? "Entrega automática al confirmarse el pago" : "Entrega digital en tu panel"}
             </li>
             <li>
               <Icon name="badge-check" /> Garantía de funcionamiento

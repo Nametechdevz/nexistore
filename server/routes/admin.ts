@@ -110,10 +110,13 @@ adminRouter.get(
 adminRouter.get(
   "/products/:id",
   ah(async (req, res) => {
-    const row = await queryOne<{ slug: string; art_color: string | null }>("SELECT slug, art_color FROM products WHERE id = ?", [intParam(req.params.id)]);
+    const row = await queryOne<{ slug: string; art_color: string | null; low_stock_threshold: number }>(
+      "SELECT slug, art_color, low_stock_threshold FROM products WHERE id = ?",
+      [intParam(req.params.id)],
+    );
     if (!row) throw notFound("Producto no encontrado.");
     // rawArtColor: color propio del producto (null = usa el de la categoría).
-    res.json({ product: { ...(await getProductBySlug(row.slug, true)), rawArtColor: row.art_color } });
+    res.json({ product: { ...(await getProductBySlug(row.slug, true)), rawArtColor: row.art_color, lowStockThreshold: Number(row.low_stock_threshold) } });
   }),
 );
 
@@ -300,7 +303,8 @@ adminRouter.post(
     await setDelivery(code, d.items);
     if (d.complete) {
       const order = await getOrder(code, undefined, true);
-      if (order.items.some((i) => !i.deliveryContent?.trim())) throw badRequest("Completa la entrega de todos los productos antes de finalizar.");
+      const pending = order.items.some((i) => (i.deliveryMode === "auto" ? !i.deliveries.some((d) => d.status === "sold") : !i.deliveryContent?.trim()));
+      if (pending) throw badRequest("Completa la entrega de todos los productos antes de finalizar.");
       await changeStatus(code, "completed", { actor: "admin" });
     }
     res.json({ order: await getOrder(code, undefined, true) });

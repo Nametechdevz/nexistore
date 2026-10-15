@@ -6,9 +6,10 @@ import { useSession } from "../../lib/state";
 const ITEMS = [
   { to: "/cuenta", label: "Inicio", icon: "home", end: true },
   { to: "/cuenta/pedidos", label: "Mis pedidos", icon: "package" },
+  { to: "/cuenta/billetera", label: "Billetera", icon: "wallet" },
   { to: "/cuenta/datos", label: "Mis datos", icon: "user" },
   { to: "/cuenta/direcciones", label: "Direcciones", icon: "pin" },
-  { to: "/cuenta/pagos", label: "Métodos de pago", icon: "wallet" },
+  { to: "/cuenta/pagos", label: "Métodos de pago", icon: "card" },
   { to: "/cuenta/cupones", label: "Cupones", icon: "ticket" },
   { to: "/cuenta/soporte", label: "Soporte", icon: "headphones" },
 ];

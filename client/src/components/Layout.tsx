@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
+import { NotificationBell } from "./Notifications";
 import { Logo, ProductArt } from "./ui";
 import { api, qs } from "../lib/api";
 import { formatCOP } from "../lib/format";
@@ -150,6 +151,9 @@ function UserMenu() {
           <Link to="/cuenta/pedidos" role="menuitem">
             <Icon name="package" /> Mis pedidos
           </Link>
+          <Link to="/cuenta/billetera" role="menuitem">
+            <Icon name="wallet" /> Billetera
+          </Link>
           {user.role === "admin" && (
             <Link to="/admin" role="menuitem">
               <Icon name="dashboard" /> Panel administrador
@@ -186,6 +190,7 @@ export function Header() {
         <Logo />
         <SearchBox />
         <div className="header-actions">
+          {user && <NotificationBell scope="user" />}
           <Link to="/carrito" className="icon-btn" aria-label={`Carrito, ${cart.count} productos`}>
             <Icon name="cart" />
             {cart.count > 0 && <span className="count-dot">{cart.count}</span>}

@@ -169,7 +169,7 @@
   color: var(--text-3);
   pointer-events: none;
 }
-.input-wrap > .input {
+.input-wrap > svg + .input {
   padding-left: 42px;
 }
 .input-wrap > .input-action {
@@ -2343,5 +2343,283 @@
   .table.responsive td:last-child:not(:first-child) {
     grid-column: 1 / -1;
     text-align: right;
+  }
+}
+
+/* ============ Notificaciones ============ */
+.notif-pop {
+  width: min(380px, calc(100vw - 24px));
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 0;
+  display: block;
+}
+.notif-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+.notif-list {
+  display: grid;
+  padding: 6px;
+}
+.menu-pop .notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--text-2);
+}
+.notif-item strong {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+}
+.notif-item.is-unread strong {
+  color: var(--text);
+}
+.notif-item.is-unread {
+  background: rgba(227, 18, 44, 0.06);
+}
+.notif-body {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-block: 2px;
+}
+.notif-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.notif-item.is-unread .notif-icon {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+.notif-icon svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+
+/* ============ Billetera ============ */
+.wallet-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--s-6);
+  padding: clamp(20px, 3vw, 32px);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  background: radial-gradient(80% 140% at 100% 0%, rgba(227, 18, 44, 0.5), transparent 60%), linear-gradient(135deg, #1b0509, #0f1017 70%);
+  border: 1px solid var(--accent-line);
+  margin-bottom: var(--s-6);
+}
+.wallet-hero .balance {
+  font-size: clamp(2rem, 1.4rem + 2vw, 3rem);
+  font-weight: var(--fw-black);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+.amount-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.amount-presets button {
+  height: 36px;
+  padding-inline: var(--s-3);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.amount-presets button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: #fff;
+}
+.ledger {
+  display: grid;
+}
+.ledger-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding-block: var(--s-3);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+.ledger-row:last-child {
+  border-bottom: 0;
+}
+.amount-pos {
+  color: var(--success);
+}
+.amount-neg {
+  color: var(--text);
+}
+
+/* ============ Chat de soporte ============ */
+.chat {
+  display: grid;
+  gap: var(--s-3);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--s-2);
+}
+.bubble {
+  max-width: min(560px, 88%);
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  white-space: pre-line;
+  word-break: break-word;
+}
+.bubble.mine {
+  justify-self: end;
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.bubble.theirs {
+  border-bottom-left-radius: 4px;
+}
+.bubble.system {
+  justify-self: center;
+  background: var(--info-soft);
+  color: #bcd4ff;
+  text-align: center;
+}
+.bubble-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.chat-compose {
+  display: flex;
+  gap: var(--s-2);
+  align-items: flex-end;
+  margin-top: var(--s-3);
+}
+.chat-compose .textarea {
+  min-height: 46px;
+  height: 46px;
+  resize: none;
+}
+
+/* ============ Inventario ============ */
+.inv-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--s-3);
+  margin-bottom: var(--s-6);
+}
+.inv-card {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  text-align: left;
+  transition: border-color var(--dur-1);
+}
+.inv-card:hover,
+.inv-card[aria-pressed="true"] {
+  border-color: var(--accent-line);
+}
+.inv-card.is-low {
+  border-color: rgba(245, 165, 36, 0.5);
+}
+.inv-counts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  text-align: center;
+}
+.inv-counts strong {
+  display: block;
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+}
+.inv-counts span {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.status-available {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.status-reserved {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.status-sold {
+  background: var(--info-soft);
+  color: #6aa5ff;
+}
+.status-fallen,
+.status-expired {
+  background: var(--danger-soft);
+  color: #ff6b6b;
+}
+.status-disabled {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.status-open {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.status-answered {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.status-closed {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.delivery-card {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  margin-top: var(--s-2);
+}
+.delivery-card.is-fallen {
+  opacity: 0.6;
+}
+.chip-warn {
+  color: var(--warning);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+@media (max-width: 640px) {
+  .wallet-hero {
+    grid-template-columns: 1fr;
   }
 }

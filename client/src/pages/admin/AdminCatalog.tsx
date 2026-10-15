@@ -47,17 +47,20 @@ export function AdminDashboard() {
         </div>
       )}
       <div className="stats">
-        <div className="stat"><span className="stat-icon"><Icon name="box" /></span><div><strong>{k?.products ?? "–"}</strong><span>Productos activos</span></div></div>
+        <div className="stat"><span className="stat-icon"><Icon name="box" /></span><div><strong>{k?.products ?? "–"}</strong><span>Productos activos · {k?.available_accounts ?? 0} cuentas disponibles</span></div></div>
         <div className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--hue-gold)" }}><Icon name="package" /></span><div><strong>{k?.orders ?? "–"}</strong><span>Pedidos</span></div></div>
         <div className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--success)" }}><Icon name="users" /></span><div><strong>{k?.customers ?? "–"}</strong><span>Clientes</span></div></div>
         <div className="stat"><span className="stat-icon" style={{ ["--hue" as string]: "var(--info)" }}><Icon name="wallet" /></span><div><strong className="num">{k ? formatCOP(k.revenue) : "–"}</strong><span>Ventas (COP)</span></div></div>
       </div>
-      {k && (k.to_deliver > 0 || k.low_stock > 0 || k.open_tickets > 0 || k.pending_payment > 0) && (
+      {k && (k.to_deliver > 0 || k.low_stock > 0 || k.open_tickets > 0 || k.pending_payment > 0 || k.open_issues > 0 || k.expiring_accounts > 0 || k.pending_topups > 0) && (
         <div className="tabs" style={{ marginBottom: 20, flexWrap: "wrap" }}>
           {k.to_deliver > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center" }} to="/admin/pedidos?estado=paid">{k.to_deliver} por entregar</Link>}
           {k.pending_payment > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center" }} to="/admin/pedidos?estado=pending_payment">{k.pending_payment} pendientes de pago</Link>}
           {k.low_stock > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center" }} to="/admin/productos">{k.low_stock} con inventario bajo</Link>}
           {k.open_tickets > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center" }} to="/admin/soporte">{k.open_tickets} solicitudes abiertas</Link>}
+          {k.open_issues > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center", color: "#ff6b6b" }} to="/admin/soporte">{k.open_issues} cuentas caídas por resolver</Link>}
+          {k.expiring_accounts > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center", color: "var(--warning)" }} to="/admin/inventario?estado=por-vencer">{k.expiring_accounts} cuentas por vencer</Link>}
+          {k.pending_topups > 0 && <Link className="tab" style={{ display: "inline-flex", alignItems: "center" }} to="/admin/billetera">{k.pending_topups} recargas por confirmar</Link>}
         </div>
       )}
       <div className="split">
@@ -126,6 +129,7 @@ type ProductForm = {
   name: string; slug: string; categoryId: number; summary: string; description: string; includesText: string; instructions: string;
   deliveryText: string; warrantyText: string; durationLabel: string; accountLabel: string; price: number; compareAtPrice: number | null;
   stock: number; maxPerOrder: number; artGlyph: string; artColor: string | null; imageUrl: string; isFeatured: boolean; isActive: boolean;
+  deliveryMode: "manual" | "auto"; durationDays: number | null; lowStockThreshold: number;
 };
 
 const emptyProduct = (categoryId = 0): ProductForm => ({
@@ -133,7 +137,7 @@ const emptyProduct = (categoryId = 0): ProductForm => ({
   deliveryText: "Entrega digital en tu panel de usuario (Mis pedidos → Ver detalle) una vez confirmado el pago.",
   warrantyText: "Garantía de funcionamiento durante todo el periodo contratado.",
   durationLabel: "", accountLabel: "", price: 0, compareAtPrice: null, stock: 0, maxPerOrder: 5, artGlyph: "", artColor: null, imageUrl: "",
-  isFeatured: false, isActive: true,
+  isFeatured: false, isActive: true, deliveryMode: "manual", durationDays: null, lowStockThreshold: 5,
 });
 
 const num = (v: string) => (v === "" ? 0 : Number(v.replace(/\D/g, "")));
@@ -151,6 +155,7 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
       instructions: p.instructions, deliveryText: p.deliveryText, warrantyText: p.warrantyText, durationLabel: p.durationLabel, accountLabel: p.accountLabel,
       price: p.price, compareAtPrice: p.compareAtPrice, stock: p.stock, maxPerOrder: p.maxPerOrder, artGlyph: p.artGlyph,
       artColor: p.rawArtColor, imageUrl: p.imageUrl ?? "", isFeatured: p.isFeatured, isActive: p.isActive,
+      deliveryMode: p.deliveryMode, durationDays: p.durationDays, lowStockThreshold: (p as unknown as { lowStockThreshold?: number }).lowStockThreshold ?? 5,
     });
     return p;
   }, [id]);
@@ -191,8 +196,13 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
           <div className="form-row">
             <TextField label="Precio (COP)" inputMode="numeric" value={v.price || ""} error={form.errors.price} onValue={(val) => form.set("price", num(val))} />
             <TextField label="Precio anterior (opcional)" inputMode="numeric" value={v.compareAtPrice ?? ""} error={form.errors.compareAtPrice} onValue={(val) => form.set("compareAtPrice", val === "" ? null : num(val))} />
-            <TextField label="Inventario" inputMode="numeric" value={v.stock} error={form.errors.stock} onValue={(val) => form.set("stock", num(val))} />
+            <TextField label="Inventario" inputMode="numeric" value={v.stock} error={form.errors.stock} onValue={(val) => form.set("stock", num(val))} disabled={v.deliveryMode === "auto"} hint={v.deliveryMode === "auto" ? "Se calcula con las cuentas disponibles." : undefined} />
             <TextField label="Máx. por pedido" inputMode="numeric" value={v.maxPerOrder} error={form.errors.maxPerOrder} onValue={(val) => form.set("maxPerOrder", num(val))} />
+          </div>
+          <div className="form-row">
+            <SelectField label="Entrega" value={v.deliveryMode} onValue={(val) => form.set("deliveryMode", val as "auto")} options={[{ value: "manual", label: "Manual (el admin entrega)" }, { value: "auto", label: "Automática desde inventario de cuentas" }]} hint={v.deliveryMode === "auto" ? "Al confirmarse el pago se entrega una cuenta del inventario y el pedido se completa solo." : undefined} />
+            <TextField label="Duración del servicio (días)" inputMode="numeric" value={v.durationDays ?? ""} error={form.errors.durationDays} onValue={(val) => form.set("durationDays", val === "" ? null : num(val))} hint="Se usa para avisar al cliente antes del vencimiento." />
+            <TextField label="Alerta de poco stock en" inputMode="numeric" value={v.lowStockThreshold} error={form.errors.lowStockThreshold} onValue={(val) => form.set("lowStockThreshold", num(val))} />
           </div>
           <div className="form-row">
             <TextField label="Duración" value={v.durationLabel} onValue={(val) => form.set("durationLabel", val)} placeholder="1 año de duración" />
@@ -289,11 +299,17 @@ export function AdminProducts() {
                     <td className="muted">{p.categoryName}</td>
                     <td className="t-right num t-strong">{formatCOP(p.price)}</td>
                     <td>
+                      {p.deliveryMode === "auto" ? (
+                        <Link to={`/admin/inventario?producto=${p.id}`} className={`status ${p.stock <= 3 ? "status-pending_payment" : "status-sold"}`} title="Gestionado por inventario de cuentas">
+                          <Icon name="key" size={12} /> {p.stock} cuentas
+                        </Link>
+                      ) : (
                       <div className="qty" style={{ height: 32 }}>
                         <button onClick={() => adjustStock(p, -1)} disabled={p.stock <= 0} aria-label="Restar inventario"><Icon name="minus" /></button>
                         <output className={p.stock <= 5 ? "text-accent" : ""}>{p.stock}</output>
                         <button onClick={() => adjustStock(p, 1)} aria-label="Sumar inventario"><Icon name="plus" /></button>
                       </div>
+                      )}
                     </td>
                     <td><button className={`status ${p.isActive ? "status-completed" : "status-neutral"}`} onClick={() => toggleActive(p)} title="Cambiar visibilidad">{p.isActive ? "Visible" : "Oculto"}</button></td>
                     <td className="t-right">

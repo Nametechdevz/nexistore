@@ -17,19 +17,21 @@ import { HomePage } from "./pages/Home";
 import { ProductPage } from "./pages/Product";
 import { AccountLayout } from "./pages/account/AccountLayout";
 import {
-  AccountOverview, AddressesPage, CouponsPage, OrderDetailPage, OrdersPage, PaymentMethodsPage, ProfilePage, SupportPage,
+  AccountOverview, AddressesPage, CouponsPage, OrderDetailPage, OrdersPage, PaymentMethodsPage, ProfilePage,
 } from "./pages/account/AccountPages";
+import { SupportPage, TicketPage, WalletPage } from "./pages/account/AccountExtra";
 import { Spinner } from "./components/ui";
 
 // El panel administrativo se carga bajo demanda: no pesa en la tienda pública.
 const adminPage = (name: string) =>
   lazy(async () => {
-    const [layout, cat, ops] = await Promise.all([
+    const [layout, cat, ops, extra] = await Promise.all([
       import("./pages/admin/AdminLayout"),
       import("./pages/admin/AdminCatalog"),
       import("./pages/admin/AdminOps"),
+      import("./pages/admin/AdminExtra"),
     ]);
-    const all = { ...layout, ...cat, ...ops } as unknown as Record<string, ComponentType>;
+    const all = { ...layout, ...cat, ...ops, ...extra } as unknown as Record<string, ComponentType>;
     return { default: all[name]! };
   });
 const Admin = (name: string) => {
@@ -78,6 +80,8 @@ const router = createBrowserRouter([
               { path: "pagos", element: <PaymentMethodsPage /> },
               { path: "cupones", element: <CouponsPage /> },
               { path: "soporte", element: <SupportPage /> },
+              { path: "soporte/:id", element: <TicketPage /> },
+              { path: "billetera", element: <WalletPage /> },
             ],
           },
           { path: "*", element: <NotFoundPage /> },
@@ -100,6 +104,9 @@ const router = createBrowserRouter([
           { path: "cupones", element: Admin("AdminCoupons") },
           { path: "contenido", element: Admin("AdminContent") },
           { path: "soporte", element: Admin("AdminTickets") },
+          { path: "soporte/:id", element: Admin("AdminTicketDetail") },
+          { path: "inventario", element: Admin("AdminInventory") },
+          { path: "billetera", element: Admin("AdminWallet") },
           { path: "reportes", element: Admin("AdminReports") },
           { path: "configuracion", element: Admin("AdminSettings") },
         ],

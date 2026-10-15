@@ -35,13 +35,14 @@ export function Steps({ current }: { current: number }) {
 }
 
 const PAY_COLORS: Record<string, string> = {
+  wallet: "#e3122c",
   mercadopago: "#00a6e0",
   wompi: "#1f1f6b",
   manual: "#7c3aed",
   paypal: "#1d4ed8",
   binance: "#d4a106",
 };
-const PAY_SHORT: Record<string, string> = { mercadopago: "MP", wompi: "W", manual: "TR", paypal: "PP", binance: "BP" };
+const PAY_SHORT: Record<string, string> = { wallet: "$", mercadopago: "MP", wompi: "W", manual: "TR", paypal: "PP", binance: "₮" };
 
 function PaymentLogos() {
   const store = useStore();
@@ -197,10 +198,11 @@ export function CheckoutPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const { data: quote, loading } = useQuote();
+  const wallet = useQuery(() => (user ? api.get<{ balance: number }>("/api/account/wallet") : Promise.resolve(null)), [user?.id]);
   const [step, setStep] = useState<1 | 2>(1);
   // Evita que, al vaciar el carrito tras crear el pedido, se redirija al carrito en lugar de la confirmación.
   const placed = useRef(false);
-  const firstConfigured = useMemo(() => store?.paymentMethods.find((m) => m.configured)?.id, [store]);
+  const firstConfigured = useMemo(() => store?.paymentMethods.find((m) => m.configured && m.id !== "wallet")?.id, [store]);
 
   const form = useForm(checkoutSchema, {
     buyerName: user?.name ?? "",
@@ -244,7 +246,7 @@ export function CheckoutPage() {
   const pay = form.submit(async (data) => {
     // El servidor recalcula todo con su carrito persistido: se sincroniza antes de pagar.
     await api.put("/api/cart", { items: cart.lines, mode: "replace" });
-    const res = await api.post<{ code: string; action: { type: "redirect"; url: string } | { type: "instructions"; text: string } | null; warning?: string }>(
+    const res = await api.post<{ code: string; status?: string; action: { type: "redirect"; url: string } | { type: "instructions"; text: string } | null; warning?: string }>(
       "/api/checkout",
       { ...data, couponCode: cart.coupon || "" },
     );
@@ -259,7 +261,7 @@ export function CheckoutPage() {
     navigate(`/pedido/${res.code}/confirmacion`, { replace: true });
   });
 
-  const anyConfigured = store?.paymentMethods.some((m) => m.configured);
+  const anyConfigured = store?.paymentMethods.some((m) => m.configured && (m.id !== "wallet" || (wallet.data?.balance ?? 0) >= (quote?.total ?? Infinity)));
 
   return (
     <div className="container section" style={{ paddingTop: 32 }}>
@@ -293,17 +295,30 @@ export function CheckoutPage() {
               </Alert>
             )}
             <div className="pay-options" role="radiogroup" aria-label="Métodos de pago">
-              {store?.paymentMethods.map((m) => (
-                <label key={m.id} className={`pay-option${m.configured ? "" : " is-disabled"}`}>
-                  <input type="radio" name="pay" value={m.id} disabled={!m.configured} checked={form.values.paymentProvider === m.id} onChange={() => form.set("paymentProvider", m.id)} />
-                  <span className="pay-logo" style={{ background: PAY_COLORS[m.id] }}>{PAY_SHORT[m.id]}</span>
-                  <span>
-                    <strong style={{ display: "block" }}>{m.label}</strong>
-                    <span className="faint" style={{ fontSize: 13 }}>{m.configured ? m.description : m.pendingReason}</span>
-                  </span>
-                  {!m.configured && <span className="status status-neutral">Pendiente</span>}
-                </label>
-              ))}
+              {store?.paymentMethods.map((m) => {
+                const total = quote?.total ?? 0;
+                const walletShort = m.id === "wallet" && (wallet.data?.balance ?? 0) < total;
+                const enabled = m.configured && !walletShort;
+                const detail =
+                  m.id === "wallet"
+                    ? `Saldo disponible: ${formatCOP(wallet.data?.balance ?? 0)}${walletShort ? " · no alcanza para este pedido" : ""}`
+                    : m.id === "binance" && m.configured && m.rate
+                      ? `Pagarás ${(Math.ceil((total / m.rate) * 100) / 100).toFixed(2)} USDT (tasa ${formatCOP(m.rate)}/USDT)`
+                      : m.configured
+                        ? m.description
+                        : m.pendingReason;
+                return (
+                  <label key={m.id} className={`pay-option${enabled ? "" : " is-disabled"}`}>
+                    <input type="radio" name="pay" value={m.id} disabled={!enabled} checked={form.values.paymentProvider === m.id} onChange={() => form.set("paymentProvider", m.id)} />
+                    <span className="pay-logo" style={{ background: PAY_COLORS[m.id] }}>{PAY_SHORT[m.id]}</span>
+                    <span>
+                      <strong style={{ display: "block" }}>{m.label}</strong>
+                      <span className="faint" style={{ fontSize: 13 }}>{detail}</span>
+                    </span>
+                    {!m.configured ? <span className="status status-neutral">Pendiente</span> : walletShort ? <Link className="btn btn-ghost btn-sm" to="/cuenta/billetera">Recargar</Link> : null}
+                  </label>
+                );
+              })}
               {store?.unavailableMethods.map((m) => (
                 <div key={m.id} className="pay-option is-disabled" aria-disabled="true">
                   <input type="radio" disabled aria-label={m.label} />
@@ -413,11 +428,13 @@ export function ConfirmationPage() {
           {paid ? "¡Pago confirmado!" : cancelled ? "Pedido cancelado" : rejected ? "El pago no fue aprobado" : "Pedido recibido"}
         </h1>
         <p className="muted" style={{ marginTop: 8 }}>
-          Pedido <strong className="num">{order.code}</strong> · {formatCOP(order.total)} · {PROVIDER_LABEL[order.paymentProvider]}
+          Pedido <strong className="num">{order.code}</strong> · {formatCOP(order.total)}
+          {order.paymentAmountForeign && ` (${order.paymentAmountForeign} ${order.paymentCurrency})`} · {PROVIDER_LABEL[order.paymentProvider]}
         </p>
         <div style={{ marginTop: 12 }}><StatusBadge status={order.status} /></div>
         <div style={{ maxWidth: 520, margin: "24px auto 0", textAlign: "left" }}>
-          {paid && <Alert kind="success">Estamos preparando tu entrega. Verás los datos de acceso en el detalle del pedido cuando esté completado.</Alert>}
+          {order.status === "completed" && <Alert kind="success">¡Listo! Tus datos de acceso ya están disponibles en el detalle del pedido.</Alert>}
+          {paid && order.status !== "completed" && <Alert kind="success">Estamos preparando tu entrega. Verás los datos de acceso en el detalle del pedido cuando esté completado.</Alert>}
           {!paid && !cancelled && order.paymentProvider === "manual" && (
             <Alert kind="info">
               <strong>Pago por transferencia.</strong> {store?.store.manualPaymentInstructions}

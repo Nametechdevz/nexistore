@@ -115,14 +115,35 @@ export function AppProviders({ children }: { children: ReactNode }) {
   userRef.current = user;
   const pushTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  const pendingPush = useRef<CartLine[] | null>(null);
   const persist = useCallback((next: CartLine[]) => {
     writeLocal(CART_KEY, next);
     if (userRef.current) {
+      pendingPush.current = next;
       clearTimeout(pushTimer.current);
       pushTimer.current = setTimeout(() => {
+        pendingPush.current = null;
         api.put("/api/cart", { items: next, mode: "replace" }).catch(() => undefined);
       }, 400);
     }
+  }, []);
+
+  // Si la página se cierra o recarga antes del envío diferido, se guarda igualmente (keepalive).
+  useEffect(() => {
+    const flush = () => {
+      if (!pendingPush.current || !userRef.current) return;
+      const csrf = document.cookie.split("; ").find((c) => c.startsWith("nx_csrf="))?.split("=")[1];
+      void fetch("/api/cart", {
+        method: "PUT",
+        keepalive: true,
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", ...(csrf ? { "x-csrf-token": decodeURIComponent(csrf) } : {}) },
+        body: JSON.stringify({ items: pendingPush.current, mode: "replace" }),
+      });
+      pendingPush.current = null;
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
   }, []);
 
   const update = useCallback(

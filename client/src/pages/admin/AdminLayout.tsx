@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/Icon";
+import { NotificationBell } from "../../components/Notifications";
 import { Empty, Logo, Spinner } from "../../components/ui";
 import { useSession } from "../../lib/state";
 
@@ -8,8 +9,10 @@ const ITEMS = [
   { to: "/admin", label: "Dashboard", icon: "dashboard", end: true },
   { to: "/admin/productos", label: "Productos", icon: "box" },
   { to: "/admin/categorias", label: "Categorías", icon: "tags" },
+  { to: "/admin/inventario", label: "Inventario de cuentas", icon: "key" },
   { to: "/admin/pedidos", label: "Pedidos", icon: "package" },
   { to: "/admin/clientes", label: "Clientes", icon: "users" },
+  { to: "/admin/billetera", label: "Billetera", icon: "wallet" },
   { to: "/admin/cupones", label: "Cupones", icon: "ticket" },
   { to: "/admin/contenido", label: "Blog / Contenido", icon: "book" },
   { to: "/admin/soporte", label: "Soporte", icon: "headphones" },
@@ -64,6 +67,7 @@ export function AdminLayout() {
           </button>
           <Logo to="/admin" sub="PANEL ADMIN" />
           <div className="header-actions">
+            <NotificationBell scope="admin" />
             <span className="user-chip">
               <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
               <span className="hide-tablet">{user.name}</span>
