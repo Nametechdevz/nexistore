@@ -56,7 +56,10 @@ const schema = z.object({
   MANUAL_PAYMENTS_ENABLED: bool,
 });
 
-const parsed = schema.safeParse(process.env);
+// Las variables vacías (por ejemplo, filas sin valor en el panel del hosting) se ignoran,
+// como si no existieran, para que apliquen los valores por defecto.
+const env = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== ""));
+const parsed = schema.safeParse(env);
 if (!parsed.success) {
   console.error("Variables de entorno inválidas:", parsed.error.issues);
   process.exit(1);
