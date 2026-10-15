@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NexiStore — Referencia de diseño</title>
+<link rel="stylesheet" href="../node_modules/@fontsource-variable/manrope/index.css" />
+<link rel="stylesheet" href="../client/src/styles/tokens.css" />
+<link rel="stylesheet" href="../client/src/styles/base.css" />
+<link rel="stylesheet" href="../client/src/styles/components.css" />
+<link rel="stylesheet" href="../client/src/styles/hero.css" />
+<style>
+  .sheet { padding-block: 48px; display: grid; gap: 40px; }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .sw { border-radius: 12px; border: 1px solid var(--line); overflow: hidden; font-size: 12px; }
+  .sw div { height: 64px; }
+  .sw p { padding: 8px 10px; color: var(--text-2); }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  h2.k { font-size: 13px; color: var(--text-3); letter-spacing: .12em; font-weight: 700; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="container header-row">
+    <a class="logo" href="#"><svg class="logo-mark" viewBox="0 0 40 40"><path d="M20 2 36 11v18L20 38 4 29V11z" fill="#e3122c"/><path d="M14 27V13h3l7 9v-9h3v14h-3l-7-9v9z" fill="#fff"/></svg><span class="logo-word"><strong>NexiStore</strong><small>PRODUCTOS DIGITALES</small></span></a>
+    <div class="search"><div class="input-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="input" placeholder="¿Qué servicio buscas?"></div></div>
+    <div class="header-actions">
+      <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6h15l-2 9H8L6 3H3"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg><span class="count-dot">2</span></button>
+      <a class="btn btn-primary btn-sm" href="#">Iniciar sesión</a>
+    </div>
+  </div>
+  <div class="container"><nav class="main-nav"><a class="active">Inicio</a><a>Productos</a><a>Categorías</a><a>Promociones</a><a>Blog</a><a>Soporte</a></nav></div>
+</header>
+
+<section class="hero">
+  <div class="snow"></div>
+  <div class="container hero-inner">
+    <div>
+      <h1 class="hero-title">Esta Navidad, más que servicios, <em>regala momentos.</em></h1>
+      <p class="hero-sub">Streaming, software, juegos e IA con entrega inmediata y garantía de funcionamiento.</p>
+      <div class="hero-cta"><a class="btn btn-primary btn-lg">Ver promociones →</a><a class="btn btn-outline btn-lg">Explorar catálogo</a></div>
+    </div>
+    <div class="hero-visual">
+      <div class="gift g1"><div class="art" style="--hue:#e3122c"><div class="art-ribbon"></div><div class="art-glyph">C+</div><div class="art-name">CinePlus</div></div></div>
+      <div class="gift g2"><div class="art" style="--hue:#1fbf75"><div class="art-glyph">S</div></div></div>
+      <div class="gift g3"><div class="art" style="--hue:#2f7bff"><div class="art-ribbon"></div><div class="art-glyph">Su</div></div></div>
+      <div class="gift g4"><div class="art" style="--hue:#8b5cf6"><div class="art-glyph">A</div></div></div>
+      <div class="gift g5"><div class="art" style="--hue:#d63384"><div class="art-ribbon"></div><div class="art-glyph">L</div></div></div>
+      <div class="seal"><div><small>HASTA</small><strong>50%</strong><small>DE DESCUENTO</small></div></div>
+    </div>
+  </div>
+</section>
+
+<div class="container">
+  <div class="trust">
+    <div class="trust-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg><div><strong>Entrega inmediata</strong><span>Recibe tu producto al instante</span></div></div>
+    <div class="trust-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5z"/></svg><div><strong>Pagos seguros</strong><span>Verificados por la pasarela</span></div></div>
+    <div class="trust-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="2" y="14" width="5" height="7" rx="2"/><rect x="17" y="14" width="5" height="7" rx="2"/></svg><div><strong>Soporte 24/7</strong><span>Estamos para ayudarte</span></div></div>
+    <div class="trust-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m2 8 5 4 5-8 5 8 5-4-2 12H4z"/></svg><div><strong>Productos originales</strong><span>100% funcionales</span></div></div>
+  </div>
+
+  <section class="section">
+    <div class="cat-strip">
+      <a class="cat-chip" style="--hue:#e3122c"><span class="cat-icon">▶</span>Streaming</a>
+      <a class="cat-chip" style="--hue:#2f7bff"><span class="cat-icon">⊞</span>Software</a>
+      <a class="cat-chip" style="--hue:#8b5cf6"><span class="cat-icon">◆</span>Juegos</a>
+      <a class="cat-chip" style="--hue:#1fbf75"><span class="cat-icon">♪</span>Música</a>
+      <a class="cat-chip" style="--hue:#13b5c9"><span class="cat-icon">✦</span>IA</a>
+      <a class="cat-chip" style="--hue:#d63384"><span class="cat-icon">✎</span>Diseño</a>
+      <a class="cat-chip" style="--hue:#2f7bff"><span class="cat-icon">▣</span>Cursos</a>
+      <a class="cat-chip" style="--hue:#13b5c9"><span class="cat-icon">▯</span>Móviles</a>
+      <a class="cat-chip" style="--hue:#e9b949"><span class="cat-icon">✉</span>Tarjetas regalo</a>
+      <a class="cat-chip" style="--hue:#f2711c"><span class="cat-icon">%</span>Ofertas</a>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><div><h2 class="section-title">Productos más populares</h2><p class="eyebrow">Lo que más se está regalando esta temporada</p></div><a class="btn btn-outline btn-sm">Ver todos →</a></div>
+    <div class="p-row">
+      <article class="pcard"><a class="pcard-media"><div class="art" style="--hue:#e3122c"><div class="art-glyph">C+</div><div class="art-name">CinePlus</div></div><span class="badge-off">-40%</span></a><div class="pcard-body"><h3 class="pcard-name">CinePlus Premium</h3><p class="pcard-meta">1 año · Perfil individual</p><div class="price-line"><span class="price">$29.900</span><span class="price-old">$49.900</span></div><button class="btn btn-primary btn-sm btn-block">Agregar</button></div></article>
+      <article class="pcard"><a class="pcard-media"><div class="art" style="--hue:#1fbf75"><div class="art-glyph">S</div><div class="art-name">Sonora</div></div><span class="badge-off">-40%</span></a><div class="pcard-body"><h3 class="pcard-name">Sonora Premium</h3><p class="pcard-meta">1 año · Individual</p><div class="price-line"><span class="price">$24.900</span><span class="price-old">$39.900</span></div><button class="btn btn-primary btn-sm btn-block">Agregar</button></div></article>
+      <article class="pcard"><a class="pcard-media"><div class="art" style="--hue:#2f7bff"><div class="art-glyph">Su</div><div class="art-name">Suite Ofimática</div></div><span class="badge-off">-45%</span></a><div class="pcard-body"><h3 class="pcard-name">Suite Ofimática Pro</h3><p class="pcard-meta">1 año · 5 dispositivos</p><div class="price-line"><span class="price">$39.900</span><span class="price-old">$69.900</span></div><button class="btn btn-primary btn-sm btn-block">Agregar</button></div></article>
+      <article class="pcard"><a class="pcard-media"><div class="art" style="--hue:#8b5cf6"><div class="art-glyph">A</div><div class="art-name">Arcadia Pass</div></div><span class="badge-off">-35%</span></a><div class="pcard-body"><h3 class="pcard-name">Arcadia Pass</h3><p class="pcard-meta">3 meses · Consola y PC</p><div class="price-line"><span class="price">$54.900</span><span class="price-old">$84.900</span></div><button class="btn btn-primary btn-sm btn-block">Agregar</button></div></article>
+      <article class="pcard"><a class="pcard-media"><div class="art" style="--hue:#13b5c9"><div class="art-glyph">L</div><div class="art-name">Lumen AI</div></div></a><div class="pcard-body"><h3 class="pcard-name">Lumen AI Pro</h3><p class="pcard-meta">1 mes · Individual</p><div class="price-line"><span class="price">$79.900</span></div><button class="btn btn-primary btn-sm btn-block">Agregar</button></div></article>
+      <article class="pcard"><a class="pcard-media"><div class="art" style="--hue:#d63384"><div class="art-glyph">Li</div><div class="art-name">Lienzo Pro</div></div><span class="badge-off">-30%</span></a><div class="pcard-body"><h3 class="pcard-name">Lienzo Pro</h3><p class="pcard-meta">1 año · Equipo de 5</p><div class="price-line"><span class="price">$89.900</span><span class="price-old">$129.900</span></div><button class="btn btn-primary btn-sm btn-block">Agregar</button></div></article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="promo"><div><h2>Ofertas de Navidad en todas las categorías</h2><p>Descuentos de temporada por tiempo limitado. Usa el cupón NAVIDAD10 y ahorra un 10% adicional.</p><a class="btn btn-light">Ver ofertas</a></div>
+    <div class="promo-stack"><div class="art" style="--hue:#e9b949;left:10%;top:20px;transform:rotate(-8deg)"><div class="art-ribbon"></div><div class="art-glyph">$</div></div><div class="art" style="--hue:#e3122c;left:42%;top:40px;transform:rotate(6deg)"><div class="art-ribbon"></div><div class="art-glyph">N</div></div></div></div>
+  </section>
+
+  <section class="sheet">
+    <div><h2 class="k">PALETA</h2><div class="swatches">
+      <div class="sw"><div style="background:var(--bg)"></div><p>bg #08090c</p></div>
+      <div class="sw"><div style="background:var(--surface)"></div><p>surface #12141c</p></div>
+      <div class="sw"><div style="background:var(--surface-2)"></div><p>surface-2 #181b26</p></div>
+      <div class="sw"><div style="background:var(--surface-3)"></div><p>surface-3 #212534</p></div>
+      <div class="sw"><div style="background:var(--accent)"></div><p>accent #e3122c</p></div>
+      <div class="sw"><div style="background:var(--success)"></div><p>success</p></div>
+      <div class="sw"><div style="background:var(--info)"></div><p>info</p></div>
+      <div class="sw"><div style="background:var(--warning)"></div><p>warning</p></div>
+    </div></div>
+    <div><h2 class="k">BOTONES · ESTADOS</h2><div class="row">
+      <button class="btn btn-primary">Agregar al carrito</button><button class="btn btn-outline">Ver detalle</button><button class="btn btn-soft">Secundario</button><button class="btn btn-ghost">Ghost</button><button class="btn btn-primary" disabled>Deshabilitado</button>
+      <span class="status status-completed">Completado</span><span class="status status-processing">Procesando</span><span class="status status-pending_payment">Pendiente de pago</span><span class="status status-cancelled">Cancelado</span><span class="badge-off">-40%</span>
+    </div></div>
+    <div style="max-width:420px"><h2 class="k">FORMULARIO</h2><div class="form">
+      <div class="field"><label class="label">Correo electrónico</label><input class="input" placeholder="tucorreo@ejemplo.com"></div>
+      <div class="field has-error"><label class="label">Contraseña</label><input class="input" value="123"><p class="field-error">Mínimo 8 caracteres.</p></div>
+      <div class="alert alert-warning">Mercado Pago: pendiente de configuración.</div>
+    </div></div>
+  </section>
+</div>
+</body>
+</html>

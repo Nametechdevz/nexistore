@@ -1,0 +1,79 @@
+/* Composición del hero: regalos formados por arte de producto propio */
+.gift {
+  position: absolute;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  animation: float 7s var(--ease) infinite alternate;
+}
+.gift .art {
+  border-radius: inherit;
+}
+.gift.g1 {
+  width: 46%;
+  left: 27%;
+  top: 16%;
+  z-index: 3;
+  transform: rotate(-4deg);
+  border-radius: var(--r-xl);
+  animation-delay: -1s;
+}
+.gift.g2 {
+  width: 24%;
+  left: 4%;
+  top: 8%;
+  z-index: 2;
+  transform: rotate(-12deg);
+  animation-delay: -3s;
+}
+.gift.g3 {
+  width: 27%;
+  right: 2%;
+  top: 44%;
+  z-index: 4;
+  transform: rotate(9deg);
+  animation-delay: -2s;
+}
+.gift.g4 {
+  width: 22%;
+  left: 8%;
+  bottom: 4%;
+  z-index: 4;
+  transform: rotate(7deg);
+  animation-delay: -5s;
+}
+.gift.g5 {
+  width: 19%;
+  left: 47%;
+  bottom: 0;
+  z-index: 5;
+  transform: rotate(-6deg);
+  animation-delay: -4s;
+}
+.hero-visual::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 6%;
+  bottom: -4%;
+  height: 16%;
+  z-index: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(227, 18, 44, 0.35), transparent);
+  filter: blur(8px);
+}
+.hero-visual .seal {
+  right: 0;
+  top: 0;
+  z-index: 6;
+}
+@keyframes float {
+  to {
+    translate: 0 -10px;
+  }
+}
+@media (max-width: 640px) {
+  .hero-visual .seal {
+    right: 2%;
+    top: 2%;
+  }
+}
