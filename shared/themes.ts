@@ -22,9 +22,15 @@ export const themeSchema = z.object({
     .default(""),
   mode: z.enum(["dark", "light"]).default("dark"),
   radius: z.enum(["suave", "redondeado", "recto"]).default("suave"),
+  /** Estilo de diseño: «clasico» (campaña de temporada) o «premium» (portada aurora y animaciones al hacer scroll). */
+  style: z.enum(["clasico", "premium"]).default("clasico"),
+  /** Textos de la portada premium. */
+  heroTitle: z.string().trim().max(80).default("Todo lo digital que amas,"),
+  heroAccent: z.string().trim().max(60).default("en un solo lugar."),
+  heroSubtitle: z.string().trim().max(220).default("Streaming, música, software, juegos e IA con entrega inmediata, pagos verificados y garantía durante todo tu servicio."),
 });
 export type ThemeSettings = z.infer<typeof themeSchema>;
-export const DEFAULT_THEME: ThemeSettings = { palette: "rojo", customAccent: "", mode: "dark", radius: "suave" };
+export const DEFAULT_THEME: ThemeSettings = themeSchema.parse({});
 
 /** true si el color es claro (necesita texto oscuro encima). */
 export function isLightColor(hex: string): boolean {
@@ -43,7 +49,7 @@ export function themeAttributes(t: ThemeSettings): { attrs: Record<string, strin
   // Color de texto sobre el acento: oscuro si el acento es claro (dorado, amarillo…).
   vars.push(`--text-on-accent:${isLightColor(accent) ? "#141008" : "#ffffff"}`);
   return {
-    attrs: { "data-accent": palette.id, "data-mode": t.mode, "data-radius": t.radius },
+    attrs: { "data-accent": palette.id, "data-mode": t.mode, "data-radius": t.radius, "data-style": t.style ?? "clasico" },
     style: vars.join(";"),
     themeColor: t.mode === "light" ? "#f4f5f9" : palette.bg,
   };

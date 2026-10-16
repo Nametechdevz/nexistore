@@ -6,6 +6,7 @@ import { Drawer, Logo, ProductArt } from "./ui";
 import { api, qs } from "../lib/api";
 import { formatCOP } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
+import { usePremiumEffects } from "../lib/premium";
 import { useCart, useSession, useStore } from "../lib/state";
 import type { ProductSummary } from "../../../shared/types";
 
@@ -330,6 +331,9 @@ function TabBar() {
 
 export function ShopLayout() {
   const { pathname } = useLocation();
+  const store = useStore();
+  const premium = (document.documentElement.dataset.style ?? store?.theme?.style) === "premium";
+  usePremiumEffects(premium, pathname);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
@@ -340,9 +344,12 @@ export function ShopLayout() {
   return (
     <>
       <a href="#main" className="sr-only">Saltar al contenido</a>
+      {premium && <div className="scroll-progress" aria-hidden="true" />}
       <Header />
       <main id="main">
-        <Outlet />
+        <div key={pathname} className="page-enter">
+          <Outlet />
+        </div>
       </main>
       <Footer />
       <TabBar />

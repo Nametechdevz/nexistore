@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
-import { Spinner } from "../../components/ui";
+import { Spinner, TextField } from "../../components/ui";
 import { api, ApiError } from "../../lib/api";
 import { applyTheme } from "../../lib/theme";
 import { useToast } from "../../lib/state";
@@ -48,6 +48,34 @@ export function ThemeSettingsPanel({ initial, onSaved }: { initial: ThemeSetting
       <p className="muted" style={{ fontSize: 14, marginBottom: 16 }}>
         Elige el estilo y míralo al instante en todo el panel. Cuando lo guardes, se aplica en la tienda para todos tus clientes.
       </p>
+
+      <span className="label">Estilo de diseño</span>
+      <div className="style-grid" role="radiogroup" aria-label="Estilo">
+        {(
+          [
+            ["premium", "Premium", "Portada aurora animada, tarjetas 3D, cinta de categorías, secciones que aparecen al hacer scroll y efectos de luz.", "sparkles"],
+            ["clasico", "Clásico de temporada", "Portada con la campaña (por ejemplo Navidad): titular, sello de descuento, fondos e ilustración de temporada.", "gift"],
+          ] as const
+        ).map(([id, label, text, icon]) => (
+          <button key={id} type="button" role="radio" aria-checked={t.style === id} className={`style-card${id === "premium" ? " is-premium" : ""}`} onClick={() => setT({ ...t, style: id })}>
+            <span className="style-icon"><Icon name={icon} /></span>
+            <span>
+              <strong>{label}{id === "premium" && <span className="badge-new">Recomendado</span>}</strong>
+              <small>{text}</small>
+            </span>
+          </button>
+        ))}
+      </div>
+      {t.style === "premium" && (
+        <div className="form" style={{ marginBottom: 20 }}>
+          <div className="form-row">
+            <TextField label="Titular" value={t.heroTitle} onValue={(v) => setT({ ...t, heroTitle: v })} maxLength={80} />
+            <TextField label="Titular (parte con degradado)" value={t.heroAccent} onValue={(v) => setT({ ...t, heroAccent: v })} maxLength={60} />
+          </div>
+          <TextField label="Subtítulo" value={t.heroSubtitle} onValue={(v) => setT({ ...t, heroSubtitle: v })} maxLength={220} />
+          <p className="hint">Para ver los cambios de la portada en vivo, guarda el tema y abre «Ver tienda».</p>
+        </div>
+      )}
 
       <span className="label">Paleta de color</span>
       <div className="theme-grid" role="radiogroup" aria-label="Paleta">

@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { backgroundFor } from "../lib/format";
 import { useDocumentTitle, useQuery } from "../lib/hooks";
 import { useStore } from "../lib/state";
+import { PremiumHome } from "./PremiumHome";
 import type { Category, ProductSummary } from "../../../shared/types";
 
 const TRUST = [
@@ -42,7 +43,17 @@ function HeroVisual({ products, seal }: { products: ProductSummary[]; seal?: { t
   );
 }
 
+/** Estilo elegido en Configuración → Apariencia (el servidor ya lo marca en <html>). */
+export const useStyle = () => {
+  const store = useStore(); // se vuelve a evaluar cuando llega la configuración
+  return (document.documentElement.dataset.style ?? store?.theme?.style) === "premium" ? "premium" : "clasico";
+};
+
 export function HomePage() {
+  return useStyle() === "premium" ? <PremiumHome /> : <ClassicHome />;
+}
+
+function ClassicHome() {
   useDocumentTitle("");
   const store = useStore();
   const campaign = store?.campaign;

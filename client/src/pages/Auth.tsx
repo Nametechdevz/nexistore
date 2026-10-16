@@ -29,7 +29,7 @@ function AuthShell({ children }: { children: ReactNode }) {
         <div className="auth-form-inner">{children}</div>
       </div>
       <aside className={`auth-aside${bg ? " has-bg" : ""}`} aria-hidden="true" style={bg ? { ["--auth-bg" as string]: `url("${bg}")` } : undefined}>
-        {store?.campaign.enabled && store.campaign.snow && <div className="snow" />}
+        {store?.campaign.enabled && store.campaign.snow && store.theme?.style !== "premium" && <div className="snow" />}
         {!bg && <div style={{ position: "absolute", inset: "8% 8% auto auto", width: "46%", transform: "rotate(8deg)" }}>
           <div className="art" style={{ ["--hue" as string]: "#e3122c", borderRadius: 22, boxShadow: "var(--shadow-3)" }}>
             <div className="art-ribbon" />

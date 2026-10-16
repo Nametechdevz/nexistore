@@ -43,5 +43,7 @@ export function backgroundFor(
   if (!campaign) return null;
   const own = zone === "hero" ? campaign.heroImage : zone === "auth" ? campaign.authImage : campaign.promoImage;
   if (own) return own;
+  // El estilo premium no usa la ilustración navideña: solo fondos propios.
+  if (typeof document !== "undefined" && document.documentElement.dataset.style === "premium") return null;
   return campaign.enabled ? SEASON_ART : null;
 }

@@ -771,6 +771,10 @@ describe("temas", () => {
     expect(html).toContain('data-mode="light"');
     expect(html).toContain("--text-on-accent:#141008"); // texto oscuro sobre dorado
     expect(html).toContain('content="#f4f5f9"');
+    expect(html).toContain('data-style="clasico"');
+    await a.put("/api/admin/settings/theme").send({ palette: "morado", mode: "dark", radius: "suave", customAccent: "", style: "premium", heroTitle: "Hola", heroAccent: "mundo." }).expect(200);
+    expect(injectTheme('<html lang="es">')).toContain('data-style="premium"');
+    expect((await request(app).get("/api/catalog/store")).body.theme).toMatchObject({ style: "premium", heroTitle: "Hola" });
     await a.put("/api/admin/settings/theme").send({ palette: "rojo", mode: "dark", radius: "suave", customAccent: '#123"><script>' }).expect(422);
     await a.put("/api/admin/settings/theme").send({ palette: "rojo", mode: "dark", radius: "suave", customAccent: "" }).expect(200);
   });

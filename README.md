@@ -119,6 +119,11 @@ En *Admin → Configuración → Apariencia de la tienda* eliges:
 - **Modo** oscuro o claro.
 - **Esquinas** rectas, suaves o redondeadas.
 
+- **Estilo de diseño:** *Premium* o *Clásico de temporada*.
+  - **Premium:** portada con fondo aurora animado, tarjetas 3D que siguen el cursor, cinta infinita de categorías, beneficios en formato bento, «Cómo funciona» con una línea que se dibuja al bajar y un llamado final con borde animado.
+  - En toda la tienda, con Premium: las secciones aparecen al hacer scroll, hay barra de progreso, la cabecera es de cristal, las tarjetas tienen un brillo que sigue al cursor y las páginas entran con una transición. Los textos de la portada se editan en el mismo panel. Todo respeta la preferencia «reducir movimiento» del sistema (`client/src/styles/premium.css`, `client/src/lib/premium.ts`).
+  - **Clásico:** usa la campaña de temporada (por ejemplo Navidad).
+
 Ves el cambio al instante en el panel y, al guardarlo, se aplica a todos los visitantes. El servidor envía el HTML ya con el tema, así que la página no parpadea con el diseño anterior. Todos los colores salen de unos pocos tokens (`client/src/styles/tokens.css`), y el texto sobre el color principal se oscurece solo cuando el color es claro (dorado, amarillo…).
 
 ## Variaciones de producto
