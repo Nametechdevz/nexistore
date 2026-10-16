@@ -10,6 +10,8 @@ import { OrdersTable } from "./AdminCatalog";
 import { CustomerWalletModal } from "./AdminExtra";
 import { IntegrationsSettings, ManualAccountsSettings, PaymentDisplaySettings } from "./AdminIntegrations";
 import { ImageUploader } from "../../components/ImageUploader";
+import { ThemeSettingsPanel } from "./AdminTheme";
+import type { ThemeSettings } from "../../../../shared/themes";
 import { RejectProofModal } from "./AdminExtra";
 import { ORDER_STATUSES, ORDER_TRANSITIONS, type OrderStatus } from "../../../../shared/constants";
 import { campaignSchema, couponInputSchema, postInputSchema, storeSettingsSchema } from "../../../../shared/schemas";
@@ -603,6 +605,7 @@ export function AdminSettings() {
       paymentMethods: PaymentMethodInfo[];
       manualAccounts: { id: string; kind: string; label: string; holder: string; number: string; qrImage: string; instructions: string; enabled: boolean }[];
       paymentDisplay: Record<string, { logo: string; label: string }>;
+      theme: ThemeSettings;
     }>("/api/admin/settings"),
   );
   const [rate, setRate] = useState("");
@@ -629,6 +632,7 @@ export function AdminSettings() {
   return (
     <>
       <div className="dash-head"><div><h1 className="dash-title">Configuración</h1><p className="eyebrow">Pagos, correo, tienda y campaña: todo se ajusta aquí.</p></div></div>
+      <ThemeSettingsPanel initial={s.data.theme} onSaved={() => undefined} />
       <IntegrationsSettings methods={s.data.paymentMethods} onSaved={() => void s.reload()} />
       <ManualAccountsSettings initial={s.data.manualAccounts ?? []} onSaved={() => void s.reload()} />
       <PaymentDisplaySettings methods={s.data.paymentMethods} initial={s.data.paymentDisplay ?? {}} onSaved={() => void s.reload()} />

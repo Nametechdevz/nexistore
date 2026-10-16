@@ -9,6 +9,7 @@ import { queryOne } from "./db.js";
 import { hashPassword } from "./lib/security.js";
 import { seedCatalog } from "./seed.js";
 import { loadIntegrations } from "./services/integrations.js";
+import { loadTheme } from "./services/theme.js";
 import { ensureVaultKey } from "./services/vault-key.js";
 import { emailSchema, passwordSchema } from "../shared/schemas.js";
 
@@ -50,6 +51,7 @@ async function main() {
   const vault = await ensureVaultKey();
   if (vault === "generated") console.log("✔ Llave de cifrado del inventario generada y guardada.");
   await loadIntegrations();
+  await loadTheme();
   await bootstrap();
 
   const app = createApp();

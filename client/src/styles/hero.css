@@ -58,7 +58,7 @@
   height: 16%;
   z-index: 0;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(227, 18, 44, 0.35), transparent);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 35%, transparent), transparent);
   filter: blur(8px);
 }
 .hero-visual .seal {

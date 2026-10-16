@@ -1,11 +1,12 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { config } from "./config.js";
 import { HttpError } from "./lib/http.js";
 import { appRoot } from "./lib/paths.js";
 import { rememberOrigin } from "./services/integrations.js";
+import { injectTheme } from "./services/theme.js";
 import { getMedia, getPrivateMedia, MEDIA_URL_RE, PRIVATE_URL_RE } from "./services/media.js";
 import { ensureCsrf, loadSession, parseCookies, verifyCsrf } from "./middleware/session.js";
 import { accountRouter } from "./routes/account.js";
@@ -108,9 +109,16 @@ export function createApp() {
   const clientDir = resolve(appRoot(), "dist/client");
   if (existsSync(clientDir)) {
     app.use(express.static(clientDir, { index: false, maxAge: "1y", immutable: true, setHeaders: noCacheHtml }));
-    app.get(/^(?!\/api\/).*/, (_req, res) => {
-      res.setHeader("cache-control", "no-cache");
-      res.sendFile(resolve(clientDir, "index.html"));
+    // index.html se lee una vez y se le aplica el tema elegido en el panel en cada respuesta.
+    let indexHtml: string | null = null;
+    app.get(/^(?!\/api\/).*/, (_req, res, next) => {
+      try {
+        indexHtml ??= readFileSync(resolve(clientDir, "index.html"), "utf8");
+        res.setHeader("cache-control", "no-cache");
+        res.type("html").send(injectTheme(indexHtml));
+      } catch (err) {
+        next(err);
+      }
     });
   }
 

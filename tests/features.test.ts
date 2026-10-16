@@ -758,3 +758,20 @@ describe("pagos manuales con comprobante", () => {
     expect((await u.post(`/api/orders/${code}/proof`).send({ accountId: acct, reference: "BRB-445566", proofUrl: proof2 })).status).toBe(409);
   });
 });
+
+describe("temas", () => {
+  it("el admin cambia el tema y el HTML ya llega con los colores", async () => {
+    const a = await adminClient();
+    expect((await a.put("/api/admin/settings/theme").send({ palette: "naranja", mode: "light", radius: "x" })).status).toBe(422);
+    await a.put("/api/admin/settings/theme").send({ palette: "dorado", mode: "light", radius: "redondeado", customAccent: "" }).expect(200);
+    expect((await request(app).get("/api/catalog/store")).body.theme).toMatchObject({ palette: "dorado", mode: "light", radius: "redondeado" });
+    const { injectTheme } = await import("../server/services/theme.js");
+    const html = injectTheme('<html lang="es"><head><meta name="theme-color" content="#08090c" /></head></html>');
+    expect(html).toContain('data-accent="dorado"');
+    expect(html).toContain('data-mode="light"');
+    expect(html).toContain("--text-on-accent:#141008"); // texto oscuro sobre dorado
+    expect(html).toContain('content="#f4f5f9"');
+    await a.put("/api/admin/settings/theme").send({ palette: "rojo", mode: "dark", radius: "suave", customAccent: '#123"><script>' }).expect(422);
+    await a.put("/api/admin/settings/theme").send({ palette: "rojo", mode: "dark", radius: "suave", customAccent: "" }).expect(200);
+  });
+});

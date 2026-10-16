@@ -6,6 +6,7 @@ import { getProductBySlug, listCategories, listProducts } from "../services/cata
 import { DEFAULT_CAMPAIGN, DEFAULT_STORE, getSetting } from "../services/settings.js";
 import { paymentMethods, UNAVAILABLE_METHODS } from "../payments/index.js";
 import { getManualAccounts, publicAccount } from "../services/manual-pay.js";
+import { theme } from "../services/theme.js";
 
 export const catalogRouter = Router();
 
@@ -39,6 +40,7 @@ catalogRouter.get(
       },
       paymentMethods: await paymentMethods(),
       manualAccounts: (await getManualAccounts()).map(publicAccount),
+      theme: theme(),
       unavailableMethods: UNAVAILABLE_METHODS,
     });
   }),

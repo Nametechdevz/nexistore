@@ -9,8 +9,8 @@ import { discountPercent, formatCOP, ORDER_STATUS_LABEL } from "../lib/format";
 export function LogoMark({ className = "logo-mark" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 40" aria-hidden="true">
-      <path d="M20 2 36 11v18L20 38 4 29V11z" fill="#e3122c" />
-      <path d="M14 27V13h3l7 9v-9h3v14h-3l-7-9v9z" fill="#fff" />
+      <path d="M20 2 36 11v18L20 38 4 29V11z" fill="var(--accent)" />
+      <path d="M14 27V13h3l7 9v-9h3v14h-3l-7-9v9z" fill="var(--text-on-accent)" />
     </svg>
   );
 }

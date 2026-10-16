@@ -8,6 +8,8 @@ import { changeStatus, getOrder, listOrders, setDelivery } from "../services/ord
 import { DEFAULT_CAMPAIGN, DEFAULT_CRYPTO, DEFAULT_STORE, getSetting, setSetting } from "../services/settings.js";
 import { detectedUrl, publicUrl, publicView, saveIntegrations } from "../services/integrations.js";
 import { testMail } from "../services/mailer.js";
+import { saveTheme, theme } from "../services/theme.js";
+import { themeSchema } from "../../shared/themes.js";
 import { getManualAccounts, getPaymentDisplay, saveManualAccounts } from "../services/manual-pay.js";
 import { notify } from "../services/notifications.js";
 import { MAX_MEDIA_BYTES, saveMedia, sniffImage } from "../services/media.js";
@@ -596,7 +598,16 @@ adminRouter.get(
       paymentMethods: await paymentMethods(),
       manualAccounts: await getManualAccounts(true),
       paymentDisplay: await getPaymentDisplay(),
+      theme: theme(),
     });
+  }),
+);
+
+/** Apariencia de la tienda (tema). Se aplica al instante para todos los visitantes. */
+adminRouter.put(
+  "/settings/theme",
+  ah(async (req, res) => {
+    res.json({ theme: await saveTheme(parse(themeSchema, req.body)) });
   }),
 );
 

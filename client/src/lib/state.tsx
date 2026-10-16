@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, setCsrfToken } from "./api";
 import { CART_MAX_QTY } from "../../../shared/constants";
 import type { CampaignSettings } from "../../../shared/schemas";
+import { applyTheme } from "./theme";
+import type { ThemeSettings } from "../../../shared/themes";
 import type { ManualAccountPublic, CartLine, PaymentMethodInfo, SessionUser } from "../../../shared/types";
 
 /* ---------------- Toasts ---------------- */
@@ -43,6 +45,7 @@ export interface StoreInfo {
   paymentMethods: PaymentMethodInfo[];
   /** Cuentas activas para pagos por transferencia (Nequi, Bre-B, QR…). */
   manualAccounts?: ManualAccountPublic[];
+  theme?: ThemeSettings;
   unavailableMethods: { id: string; label: string; reason: string }[];
 }
 const StoreCtx = createContext<StoreInfo | null>(null);
@@ -121,7 +124,14 @@ export function AppProviders({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<StoreInfo | null>(null);
   useEffect(() => {
     void refresh();
-    api.get<StoreInfo>("/api/catalog/store").then(setStore).catch(() => undefined);
+    api
+      .get<StoreInfo>("/api/catalog/store")
+      .then((s) => {
+        setStore(s);
+        // El servidor ya envía el HTML con el tema; esto cubre el modo desarrollo.
+        if (s.theme) applyTheme(s.theme);
+      })
+      .catch(() => undefined);
   }, [refresh]);
 
   /* Carrito: localStorage siempre; además en servidor si hay sesión. */

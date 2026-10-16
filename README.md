@@ -111,6 +111,16 @@ Hay una campana en la tienda y otra en el panel. Las alertas importantes tambié
 | Vencidas | — | Se marcan solas y salen del stock |
 | Cuenta caída / reemplazada / reembolsos / respuestas de soporte | Cliente o admin | Al ocurrir |
 
+## Temas de diseño
+
+En *Admin → Configuración → Apariencia de la tienda* eliges:
+
+- **Paleta:** Rojo NexiStore, Azul eléctrico, Morado neón, Verde esmeralda, Negro y dorado, Naranja atardecer o Rosa fucsia. También puedes poner un **color de marca propio** con el selector.
+- **Modo** oscuro o claro.
+- **Esquinas** rectas, suaves o redondeadas.
+
+Ves el cambio al instante en el panel y, al guardarlo, se aplica a todos los visitantes. El servidor envía el HTML ya con el tema, así que la página no parpadea con el diseño anterior. Todos los colores salen de unos pocos tokens (`client/src/styles/tokens.css`), y el texto sobre el color principal se oscurece solo cuando el color es claro (dorado, amarillo…).
+
 ## Variaciones de producto
 
 En *Admin → Productos → Editar → Opciones del producto* cada producto puede tener hasta 20 opciones (por ejemplo «1 mes», «3 meses», «1 año»), cada una con su precio, precio anterior, inventario y duración en días. El catálogo muestra «Desde» el precio más bajo y en la ficha el cliente elige la opción. Con entrega automática, las cuentas se cargan para una opción concreta o como **compartidas** (sirven para cualquier opción); al vender se usan primero las de la opción. La duración de la opción define el fin del servicio del cliente. Quitar una opción con pedidos la desactiva en vez de borrarla.
