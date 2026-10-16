@@ -21,6 +21,9 @@ mkdirSync(stage, { recursive: true });
 for (const p of ["dist", "db/migrations"]) cpSync(join(root, p), join(stage, p), { recursive: true });
 cpSync(join(root, ".env.example"), join(stage, ".env.example"));
 cpSync(join(root, "docs/LEEME-HOSTINGER.md"), join(stage, "LEEME-HOSTINGER.md"));
+// Instalación en VPS (Linode, DigitalOcean…): instalador, actualizador y guía.
+cpSync(join(root, "docs/LEEME-VPS.md"), join(stage, "LEEME-VPS.md"));
+for (const f of ["instalar.sh", "actualizar.sh"]) cpSync(join(root, "scripts/vps", f), join(stage, f));
 
 // package.json de producción: solo las dependencias que usa el servidor (el frontend ya va compilado).
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -51,4 +54,6 @@ console.log("› Comprimiendo…");
 const zip = join(out, "nexistore-hostinger.zip");
 run(`python3 -c "import shutil; shutil.make_archive('${zip.replace(/\.zip$/, "")}', 'zip', '${stage}')"`);
 if (!existsSync(zip)) throw new Error("No se generó el zip");
+// Mismo contenido con un nombre más claro para quien instala en un VPS.
+cpSync(zip, join(out, "nexistore-vps.zip"));
 console.log(`✔ Listo: ${zip}`);

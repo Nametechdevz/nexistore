@@ -18,6 +18,8 @@ const schema = z.object({
   // Compilado (dist/) = producción por defecto: en el hosting no hace falta definirlo.
   NODE_ENV: z.enum(["development", "production", "test"]).default(/[\\/]dist[\\/]/.test(process.argv[1] ?? "") ? "production" : "development"),
   PORT: z.coerce.number().int().default(3000),
+  /** Interfaz de escucha. En un VPS detrás de Nginx: 127.0.0.1 (solo accesible desde el propio servidor). */
+  HOST: z.string().optional(),
   /** Opcional: la URL pública también se configura en el panel o se detecta sola. */
   APP_URL: z.string().url().optional(),
   /** Por defecto true en producción (Hostinger y la mayoría de hostings usan proxy). */

@@ -57,6 +57,15 @@ BASE_URL=http://localhost:3000 ADMIN_EMAIL=... ADMIN_PASSWORD=... node tests/e2e
 
 `npm run typecheck` valida los tipos del frontend y del backend.
 
+## Instalación en un VPS (Linode, DigitalOcean, Vultr…)
+
+`scripts/vps/instalar.sh` instala todo con un solo comando en Ubuntu 22.04/24.04 o Debian 12:
+
+- Node.js 22, MariaDB (con usuario y contraseña aleatoria), la app como servicio systemd escuchando solo en `127.0.0.1`.
+- Nginx como proxy, SSL de Let's Encrypt, firewall UFW (22/80/443), swap en planes pequeños y copia diaria de la base de datos (14 días).
+
+`scripts/vps/actualizar.sh` instala una versión nueva conservando `.env` y los datos. Guía paso a paso: `docs/LEEME-VPS.md`. Ambos scripts van dentro del ZIP (`npm run package:hostinger` genera también `release/nexistore-vps.zip`).
+
 ## Despliegue en Hostinger (Node.js + MySQL)
 
 Sirve para los planes de Hostinger con aplicaciones **Node.js** (Business o Cloud).

@@ -55,9 +55,11 @@ async function main() {
   await bootstrap();
 
   const app = createApp();
-  app.listen(config.PORT, () => {
-    console.log(`NexiStore escuchando en http://localhost:${config.PORT} (${config.NODE_ENV})`);
-  });
+  const onListen = () => {
+    console.log(`NexiStore escuchando en http://${config.HOST ?? "localhost"}:${config.PORT} (${config.NODE_ENV})`);
+  };
+  if (config.HOST) app.listen(config.PORT, config.HOST, onListen);
+  else app.listen(config.PORT, onListen);
 
   // Mantenimiento cada hora: sesiones vencidas, pedidos sin pagar > 48 h, alertas de inventario e imágenes sin usar.
   const maintenance = async () => {
