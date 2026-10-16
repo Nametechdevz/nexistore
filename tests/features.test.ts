@@ -19,9 +19,24 @@ async function product(slug: string) {
   return (await request(app).get(`/api/catalog/products/${slug}`)).body.product as { id: number; price: number; stock: number; deliveryMode: string };
 }
 
+const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/** Datos de una recarga por transferencia con comprobante (configura una cuenta Nequi si no hay). */
+async function manualTopup(u: Client, amount: number) {
+  let accounts = (await request(app).get("/api/catalog/store")).body.manualAccounts as { id: string }[];
+  if (!accounts.length) {
+    const a = await adminClient();
+    await a.put("/api/admin/settings/manual-accounts").send({ accounts: [{ kind: "nequi", label: "Nequi pruebas", number: "3000000000" }] }).expect(200);
+    accounts = (await request(app).get("/api/catalog/store")).body.manualAccounts;
+  }
+  const proofUrl = (await u.post("/api/account/proofs").set("content-type", "image/png").send(TINY_PNG)).body.url as string;
+  return { amount, provider: "manual", accountId: accounts[0]!.id, reference: `REF${Date.now()}${Math.floor(Math.random() * 1000)}`, proofUrl };
+}
+
 async function fundWallet(u: Client, amount: number) {
   const a = await adminClient();
-  const t = await u.post("/api/account/wallet/topups").send({ amount, provider: "manual" });
+  const body = await manualTopup(u, amount);
+  const t = await u.post("/api/account/wallet/topups").send(body);
   expect(t.status).toBe(201);
   await a.post(`/api/admin/wallet/topups/${t.body.code}/confirm`).expect(200);
   return a;
@@ -36,7 +51,8 @@ async function buyWithWallet(u: Client, slug: string, qty = 1) {
 describe("billetera", () => {
   it("recarga por transferencia: queda pendiente hasta que el admin la confirma", async () => {
     const u = await registered();
-    const t = await u.post("/api/account/wallet/topups").send({ amount: 50000, provider: "manual" });
+    const body = await manualTopup(u, 50000);
+    const t = await u.post("/api/account/wallet/topups").send(body);
     expect(t.body.action.type).toBe("instructions");
     expect((await u.get("/api/account/wallet")).body.balance).toBe(0);
     const a = await adminClient();
@@ -546,5 +562,199 @@ describe("fondos de la campaña", () => {
     expect(pub.campaign.heroProducts).toBe(false);
     expect((await a.put("/api/admin/settings/campaign").send({ ...current, heroImage: "javascript:alert(1)" })).status).toBe(422);
     await a.put("/api/admin/settings/campaign").send({ ...current, heroImage: "" }).expect(200);
+  });
+});
+
+describe("variaciones de producto", () => {
+  it("producto manual con opciones: precio desde, stock por opción, pedido y cancelación", async () => {
+    const a = await adminClient();
+    const cats = (await a.get("/api/admin/categories")).body.items;
+    const body = {
+      name: "Plan Música Opciones", slug: "plan-musica-opciones", categoryId: cats[0].id, description: "Producto con varias opciones de duración",
+      price: 100, stock: 0,
+      variants: [
+        { name: "1 mes", price: 12000, compareAtPrice: 15000, stock: 3, durationDays: 30 },
+        { name: "3 meses", price: 30000, stock: 1, durationDays: 90 },
+      ],
+    };
+    const created = await a.post("/api/admin/products").send(body);
+    expect(created.status).toBe(201);
+    let pub = (await request(app).get("/api/catalog/products/plan-musica-opciones")).body.product;
+    expect(pub.hasVariants).toBe(true);
+    expect(pub.price).toBe(12000); // «Desde»
+    expect(pub.stock).toBe(4);
+    expect(pub.variants.map((v: { name: string }) => v.name)).toEqual(["1 mes", "3 meses"]);
+    const [m1, m3] = pub.variants;
+
+    // Sin opción no se puede comprar; con opción se cobra el precio de la opción.
+    const u = await registered();
+    await u.put("/api/cart").send({ items: [{ productId: pub.id, quantity: 1 }] });
+    const noVariant = await u.post("/api/cart/quote").send({ items: [{ productId: pub.id, quantity: 1 }] });
+    expect(noVariant.body.items).toHaveLength(0);
+    const q = await u.post("/api/cart/quote").send({ items: [{ productId: pub.id, variantId: m3.id, quantity: 1 }] });
+    expect(q.body.total).toBe(30000);
+    expect(q.body.items[0].variant.name).toBe("3 meses");
+    // No hay 2 unidades de «3 meses».
+    await u.put("/api/cart").send({ items: [{ productId: pub.id, variantId: m3.id, quantity: 2 }] });
+    expect((await u.post("/api/checkout").send(checkoutBody("manual"))).status).toBe(409);
+    await u.put("/api/cart").send({ items: [{ productId: pub.id, variantId: m3.id, quantity: 1 }, { productId: pub.id, variantId: m1.id, quantity: 2 }] });
+    const order = await u.post("/api/checkout").send(checkoutBody("manual"));
+    expect(order.status).toBe(201);
+    const detail = (await u.get(`/api/orders/${order.body.code}`)).body.order;
+    expect(detail.total).toBe(54000);
+    expect(detail.items.map((i: { variantName: string }) => i.variantName).sort()).toEqual(["1 mes", "3 meses"]);
+    pub = (await request(app).get("/api/catalog/products/plan-musica-opciones")).body.product;
+    expect(pub.variants.map((v: { stock: number }) => v.stock)).toEqual([1, 0]);
+    // Cancelar devuelve el inventario de cada opción.
+    await a.post(`/api/admin/orders/${order.body.code}/status`).send({ status: "cancelled", note: "prueba" }).expect(200);
+    pub = (await request(app).get("/api/catalog/products/plan-musica-opciones")).body.product;
+    expect(pub.variants.map((v: { stock: number }) => v.stock)).toEqual([3, 1]);
+
+    // Quitar una opción con pedidos la desactiva (no se borra).
+    await a.put(`/api/admin/products/${created.body.id}`).send({ ...body, variants: [{ id: m1.id, name: "1 mes", price: 11000, stock: 3, durationDays: 30 }] }).expect(200);
+    pub = (await request(app).get("/api/catalog/products/plan-musica-opciones")).body.product;
+    expect(pub.variants).toHaveLength(1);
+    expect(pub.price).toBe(11000);
+    expect(await queryOne("SELECT is_active FROM product_variants WHERE id = ?", [m3.id])).toEqual({ is_active: 0 });
+  });
+
+  it("entrega automática: cuentas de la opción y compartidas, duración de la opción", async () => {
+    const a = await adminClient();
+    const cats = (await a.get("/api/admin/categories")).body.items;
+    const body = {
+      name: "Streaming Opciones Auto", slug: "streaming-opciones-auto", categoryId: cats[0].id, description: "Entrega automática con opciones",
+      price: 100, stock: 0, deliveryMode: "auto", durationDays: 30,
+      variants: [{ name: "1 mes", price: 10000, durationDays: 30 }, { name: "1 año", price: 90000, durationDays: 365 }],
+    };
+    const created = await a.post("/api/admin/products").send(body);
+    expect(created.status).toBe(201);
+    let pub = (await request(app).get("/api/catalog/products/streaming-opciones-auto")).body.product;
+    const [mes, anio] = pub.variants;
+    await a.post("/api/admin/inventory/bulk").send({ productId: pub.id, variantId: anio.id, lines: "anual@x.co:clave1" }).expect(201);
+    await a.post("/api/admin/inventory/bulk").send({ productId: pub.id, lines: "compartida@x.co:clave2" }).expect(201);
+    pub = (await request(app).get("/api/catalog/products/streaming-opciones-auto")).body.product;
+    expect(pub.variants.map((v: { stock: number }) => v.stock)).toEqual([1, 2]); // mes: compartida · año: propia + compartida
+    expect(pub.stock).toBe(2);
+
+    const u = await registered();
+    await fundWallet(u, 200000);
+    await u.put("/api/cart").send({ items: [{ productId: pub.id, variantId: anio.id, quantity: 1 }] });
+    const r = await u.post("/api/checkout").send(checkoutBody("wallet"));
+    expect(r.status).toBe(201);
+    const o = (await u.get(`/api/orders/${r.body.code}`)).body.order;
+    expect(o.status).toBe("completed");
+    expect(o.items[0].deliveries[0].content).toBe("anual@x.co:clave1"); // usa primero la cuenta de la opción
+    const days = (new Date(o.items[0].deliveries[0].serviceEndsAt).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(364);
+    pub = (await request(app).get("/api/catalog/products/streaming-opciones-auto")).body.product;
+    expect(pub.variants.map((v: { stock: number }) => v.stock)).toEqual([1, 1]);
+    void mes;
+  });
+});
+
+describe("pagos manuales con comprobante", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+  it("el admin configura cuentas y logos; la tienda solo muestra las activas", async () => {
+    const a = await adminClient();
+    const logo = (await a.post("/api/admin/media").set("content-type", "image/png").send(PNG)).body.url as string;
+    const bad = await a.put("/api/admin/settings/manual-accounts").send({ accounts: [{ kind: "nequi", label: "Nequi", number: "" }] });
+    expect(bad.status).toBe(422);
+    const saved = await a.put("/api/admin/settings/manual-accounts").send({
+      accounts: [
+        { kind: "nequi", label: "Nequi tienda", holder: "Tienda SAS", number: "3001234567" },
+        { kind: "breb", label: "Llave Bre-B", number: "@tienda" },
+        { kind: "qr", label: "QR Bancolombia", qrImage: logo, enabled: false },
+      ],
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.accounts.every((x: { id: string }) => /^[a-z0-9]{6,16}$/.test(x.id))).toBe(true);
+    await a.put("/api/admin/settings/payment-display").send({ manual: { logo, label: "Nequi / Bre-B" } }).expect(200);
+    const store = (await request(app).get("/api/catalog/store")).body;
+    expect(store.manualAccounts.map((x: { label: string }) => x.label)).toEqual(["Nequi tienda", "Llave Bre-B"]);
+    const manual = store.paymentMethods.find((m: { id: string }) => m.id === "manual");
+    expect(manual.logo).toBe(logo);
+    expect(manual.label).toBe("Nequi / Bre-B");
+  });
+
+  it("recarga con comprobante: privado, rechazo y aprobación con notificación", async () => {
+    const a = await adminClient();
+    const store = (await request(app).get("/api/catalog/store")).body;
+    const acct = store.manualAccounts[0].id as string;
+    const u = await registered();
+    const other = await registered();
+
+    // Sin comprobante no se puede.
+    const missing = await u.post("/api/account/wallet/topups").send({ amount: 20000, provider: "manual", accountId: acct, reference: "M123456" });
+    expect(missing.status).toBe(422);
+    expect(missing.body.fields.proofUrl).toBeTruthy();
+
+    const proof = (await u.post("/api/account/proofs").set("content-type", "image/png").send(PNG)).body.url as string;
+    expect(proof).toMatch(/^\/api\/files\//);
+    // Privado: el público y otros clientes no lo ven; el dueño y el admin sí.
+    expect((await request(app).get(proof)).status).toBe(401);
+    expect((await other.get(proof)).status).toBe(404);
+    expect((await u.get(proof)).status).toBe(200);
+    expect((await a.get(proof)).status).toBe(200);
+    // Otro cliente no puede usar un comprobante ajeno.
+    expect((await other.post("/api/account/wallet/topups").send({ amount: 20000, provider: "manual", accountId: acct, reference: "M123456", proofUrl: proof })).status).toBe(422);
+
+    const t1 = await u.post("/api/account/wallet/topups").send({ amount: 20000, provider: "manual", accountId: acct, reference: "M123456", proofUrl: proof });
+    expect(t1.status).toBe(201);
+    const list = (await a.get("/api/admin/wallet/topups?status=pending")).body.items;
+    const row = list.find((x: { code: string }) => x.code === t1.body.code);
+    expect(row.proofUrl).toBe(proof);
+    expect(row.proofReference).toBe("M123456");
+    expect(row.manualAccount).toContain("Nequi tienda");
+    const adminNotif = (await a.get("/api/admin/notifications")).body.items[0];
+    expect(adminNotif.title).toContain("Recarga por revisar");
+
+    await a.post(`/api/admin/wallet/topups/${t1.body.code}/reject`).send({ reason: "El comprobante no corresponde" }).expect(200);
+    let w = (await u.get("/api/account/wallet")).body;
+    expect(w.balance).toBe(0);
+    expect(w.topups[0].status).toBe("rejected");
+    expect(w.topups[0].reviewNote).toBe("El comprobante no corresponde");
+    const n1 = (await u.get("/api/account/notifications")).body.items[0];
+    expect(n1.title).toContain("rechazada");
+
+    const proof2 = (await u.post("/api/account/proofs").set("content-type", "image/png").send(PNG)).body.url as string;
+    const t2 = await u.post("/api/account/wallet/topups").send({ amount: 25000, provider: "manual", accountId: acct, reference: "M123456", proofUrl: proof2 });
+    const row2 = (await a.get("/api/admin/wallet/topups?status=pending")).body.items.find((x: { code: string }) => x.code === t2.body.code);
+    expect(row2.duplicateRef).toBe(false); // la anterior fue rechazada
+    await a.post(`/api/admin/wallet/topups/${t2.body.code}/confirm`).expect(200);
+    w = (await u.get("/api/account/wallet")).body;
+    expect(w.balance).toBe(25000);
+    const n2 = (await u.get("/api/account/notifications")).body.items[0];
+    expect(n2.title).toContain("acreditada");
+  });
+
+  it("pedido por transferencia: el cliente envía comprobante, el admin rechaza o confirma", async () => {
+    const a = await adminClient();
+    const store = (await request(app).get("/api/catalog/store")).body;
+    const acct = store.manualAccounts[1].id as string;
+    const u = await registered();
+    const p = await product("fit-app-pro");
+    await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] });
+    const code = (await u.post("/api/checkout").send(checkoutBody("manual"))).body.code as string;
+    const proof = (await u.post("/api/account/proofs").set("content-type", "image/png").send(PNG)).body.url as string;
+    const sent = await u.post(`/api/orders/${code}/proof`).send({ accountId: acct, reference: "BRB-998877", proofUrl: proof });
+    expect(sent.status).toBe(200);
+    expect(sent.body.order.proof.reference).toBe("BRB-998877");
+    const adminView = (await a.get(`/api/admin/orders/${code}`)).body.order;
+    expect(adminView.proof.url).toBe(proof);
+    expect(adminView.proof.account).toContain("Bre-B");
+
+    await a.post(`/api/admin/orders/${code}/reject-proof`).send({ reason: "Referencia no encontrada" }).expect(200);
+    const after = (await u.get(`/api/orders/${code}`)).body.order;
+    expect(after.proof.url).toBeNull();
+    expect(after.status).toBe("pending_payment");
+    expect((await u.get("/api/account/notifications")).body.items[0].body).toContain("Referencia no encontrada");
+
+    const proof2 = (await u.post("/api/account/proofs").set("content-type", "image/png").send(PNG)).body.url as string;
+    await u.post(`/api/orders/${code}/proof`).send({ accountId: acct, reference: "BRB-112233", proofUrl: proof2 }).expect(200);
+    await a.post(`/api/admin/orders/${code}/status`).send({ status: "paid", note: "Transferencia verificada" }).expect(200);
+    expect((await u.get(`/api/orders/${code}`)).body.order.status).not.toBe("pending_payment");
+    // Ya pagado: no acepta más comprobantes.
+    expect((await u.post(`/api/orders/${code}/proof`).send({ accountId: acct, reference: "BRB-445566", proofUrl: proof2 })).status).toBe(409);
   });
 });

@@ -38,12 +38,13 @@ async function prepare(file: File, maxSide: number): Promise<Blob> {
   }
 }
 
-export async function uploadImage(file: File, maxSide = 1600): Promise<string> {
+/** Sube una imagen ya optimizada. endpoint: /api/admin/media (pública) o /api/account/proofs (comprobante privado). */
+export async function uploadImage(file: File, maxSide = 1600, endpoint = "/api/admin/media"): Promise<string> {
   if (!ACCEPT.split(",").includes(file.type)) throw new Error(`«${file.name}» no es JPG, PNG, WebP ni GIF.`);
   if (file.size > MAX_INPUT) throw new Error(`«${file.name}» pesa más de 15 MB.`);
   const blob = await prepare(file, maxSide);
   if (blob.size > MAX_UPLOAD) throw new Error(`«${file.name}» sigue pesando más de 3 MB después de reducirla.`);
-  const r = await api.upload<{ url: string }>("/api/admin/media", blob);
+  const r = await api.upload<{ url: string }>(endpoint, blob);
   return r.url;
 }
 

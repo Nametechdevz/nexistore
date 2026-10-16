@@ -6,6 +6,8 @@ import type { PaymentAdapter } from "./types.js";
 import { wompi } from "./wompi.js";
 import type { PaymentProvider } from "../../shared/constants.js";
 import type { PaymentMethodInfo } from "../../shared/types.js";
+import { MANUAL_ACCOUNT_KINDS } from "../../shared/schemas.js";
+import { getManualAccounts, getPaymentDisplay } from "../services/manual-pay.js";
 
 /**
  * Transferencia con verificación manual: el pedido queda "Pendiente de pago" hasta que un
@@ -13,7 +15,7 @@ import type { PaymentMethodInfo } from "../../shared/types.js";
  */
 const manual: PaymentAdapter = {
   id: "manual",
-  label: "Transferencia (Nequi, Daviplata, Bancolombia)",
+  label: "Transferencia (Nequi, Bre-B, QR)",
   description: "Transfiere y envía el comprobante. Confirmamos tu pago manualmente.",
   pendingReason: "Desactivado: actívalo en Admin → Configuración → Pagos.",
   isConfigured: () => integ().manualEnabled,
@@ -63,6 +65,10 @@ export async function foreignQuoteFor(provider: PaymentProvider): Promise<((tota
 export async function isProviderReady(id: PaymentProvider): Promise<{ ok: boolean; reason?: string }> {
   const a = adapters[id];
   if (!a.isConfigured()) return { ok: false, reason: a.pendingReason };
+  // La transferencia necesita al menos una cuenta visible (Nequi, Bre-B, QR…) para recibir el comprobante.
+  if (id === "manual" && !(await getManualAccounts()).length) {
+    return { ok: false, reason: "Agrega al menos una cuenta en Admin → Configuración → Cuentas para transferencias." };
+  }
   if (id === "zenobank" && ZENO_CURRENCY() !== "COP" && !(await cryptoRate())) {
     return { ok: false, reason: `Pendiente de configuración: define la tasa COP/${ZENO_CURRENCY()} en Configuración.` };
   }
@@ -71,13 +77,22 @@ export async function isProviderReady(id: PaymentProvider): Promise<{ ok: boolea
 
 export async function paymentMethods(): Promise<PaymentMethodInfo[]> {
   const rate = await cryptoRate();
+  const display = await getPaymentDisplay();
+  const accounts = await getManualAccounts();
   return Promise.all(
     Object.values(adapters).map(async (a) => {
       const ready = await isProviderReady(a.id);
+      const d = display[a.id];
+      // La transferencia muestra las cuentas configuradas (Nequi, Bre-B, QR…).
+      const description =
+        a.id === "manual" && accounts.length
+          ? `Transfiere a ${[...new Set(accounts.map((x) => MANUAL_ACCOUNT_KINDS[x.kind].replace(/ \(.*\)$/, "")))].join(", ")} y sube tu comprobante. Lo confirmamos manualmente.`
+          : a.description;
       return {
         id: a.id,
-        label: a.label,
-        description: a.description,
+        label: d?.label || a.label,
+        description,
+        logo: d?.logo || null,
         configured: ready.ok,
         pendingReason: ready.ok ? undefined : ready.reason,
         ...(a.id === "zenobank" ? { currency: ZENO_CURRENCY(), rate: ZENO_CURRENCY() === "COP" ? null : rate } : {}),

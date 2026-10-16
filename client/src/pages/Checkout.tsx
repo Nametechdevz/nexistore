@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
+import { OrderManualPay } from "../components/ManualPay";
+import { PayLogo } from "../components/PayLogo";
 import { Alert, Check, Empty, ErrorState, ProductArt, QtyStepper, Skeleton, Spinner, StatusBadge, SubmitButton, TextArea, TextField } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { formatCOP, PROVIDER_LABEL } from "../lib/format";
@@ -10,8 +12,9 @@ import { checkoutSchema } from "../../../shared/schemas";
 import type { Order, ProductSummary } from "../../../shared/types";
 
 interface Quote {
-  items: { product: ProductSummary; quantity: number; available: boolean; lineTotal: number }[];
+  items: { product: ProductSummary; variant: { id: number; name: string } | null; quantity: number; available: boolean; lineTotal: number }[];
   removed: number[];
+  removedLines?: { productId: number; variantId: number | null }[];
   coupon: { code: string; kind: string; value: number } | null;
   couponError: string | null;
   subtotal: number;
@@ -34,16 +37,6 @@ export function Steps({ current }: { current: number }) {
   );
 }
 
-const PAY_COLORS: Record<string, string> = {
-  wallet: "#e3122c",
-  mercadopago: "#00a6e0",
-  wompi: "#1f1f6b",
-  manual: "#7c3aed",
-  paypal: "#1d4ed8",
-  zenobank: "#7c5cff",
-};
-const PAY_SHORT: Record<string, string> = { wallet: "$", mercadopago: "MP", wompi: "W", manual: "TR", paypal: "PP", zenobank: "₿" };
-
 function PaymentLogos() {
   const store = useStore();
   if (!store) return null;
@@ -51,15 +44,8 @@ function PaymentLogos() {
     <div>
       <p className="label" style={{ marginTop: 24 }}>Métodos de pago</p>
       <div className="pay-logos">
-        {store.paymentMethods.map((m) => (
-          <span key={m.id} className="pay-logo" style={{ background: PAY_COLORS[m.id], opacity: m.configured ? 1 : 0.35 }} title={m.configured ? m.label : `${m.label} — ${m.pendingReason}`}>
-            {PAY_SHORT[m.id]}
-          </span>
-        ))}
-        {store.unavailableMethods.map((m) => (
-          <span key={m.id} className="pay-logo" style={{ background: PAY_COLORS[m.id], opacity: 0.35 }} title={`${m.label} — ${m.reason}`}>
-            {PAY_SHORT[m.id]}
-          </span>
+        {store.paymentMethods.filter((m) => m.configured).map((m) => (
+          <PayLogo key={m.id} id={m.id} logo={m.logo} label={m.label} />
         ))}
       </div>
     </div>
@@ -121,9 +107,9 @@ export function CartPage() {
 
   // Elimina del carrito productos que ya no existen o fueron desactivados.
   useEffect(() => {
-    if (quote?.removed.length) quote.removed.forEach((id) => cart.remove(id));
+    (quote?.removedLines ?? []).forEach((l) => cart.remove(l.productId, l.variantId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote?.removed.join(",")]);
+  }, [JSON.stringify(quote?.removedLines ?? [])]);
 
   if (!cart.lines.length)
     return (
@@ -145,19 +131,19 @@ export function CartPage() {
           {error && <ErrorState message={error.message} onRetry={reload} />}
           {loading && !quote && <div style={{ display: "grid", gap: 12, marginTop: 16 }}><Skeleton h={88} /><Skeleton h={88} /></div>}
           <div style={{ marginTop: 8 }}>
-            {quote?.items.map(({ product: p, quantity, available, lineTotal }) => (
-              <div key={p.id} className="line-item">
+            {quote?.items.map(({ product: p, variant, quantity, available, lineTotal }) => (
+              <div key={`${p.id}:${variant?.id ?? 0}`} className="line-item">
                 <Link to={`/producto/${p.slug}`}><ProductArt glyph={p.artGlyph} color={p.artColor} imageUrl={p.imageUrl} showName={false} /></Link>
                 <div style={{ minWidth: 0 }}>
                   <Link to={`/producto/${p.slug}`} style={{ fontWeight: 700 }}>{p.name}</Link>
-                  <p className="pcard-meta">{p.summary}</p>
+                  {variant ? <p className="variant-tag">{variant.name}</p> : <p className="pcard-meta">{p.summary}</p>}
                   <p className="price num" style={{ fontSize: 16 }}>{formatCOP(p.price)}</p>
                   {!available && <p className="field-error">Solo quedan {p.stock} unidades disponibles.</p>}
                 </div>
                 <div className="line-item-end">
-                  <QtyStepper value={quantity} onChange={(v) => cart.setQty(p.id, v)} max={Math.max(1, Math.min(p.maxPerOrder, p.stock))} label={p.name} />
+                  <QtyStepper value={quantity} onChange={(v) => cart.setQty(p.id, v, variant?.id)} max={Math.max(1, Math.min(p.maxPerOrder, p.stock))} label={p.name} />
                   <span className="num hide-tablet" style={{ minWidth: 90, textAlign: "right", fontWeight: 700 }}>{formatCOP(lineTotal)}</span>
-                  <button className="icon-btn btn-danger" onClick={() => cart.remove(p.id)} aria-label={`Eliminar ${p.name}`}>
+                  <button className="icon-btn btn-danger" onClick={() => cart.remove(p.id, variant?.id)} aria-label={`Eliminar ${p.name}${variant ? ` ${variant.name}` : ""}`}>
                     <Icon name="trash" />
                   </button>
                 </div>
@@ -291,7 +277,7 @@ export function CheckoutPage() {
               </Alert>
             )}
             <div className="pay-options" role="radiogroup" aria-label="Métodos de pago">
-              {store?.paymentMethods.map((m) => {
+              {store?.paymentMethods.filter((m) => m.configured).map((m) => {
                 const total = quote?.total ?? 0;
                 const walletShort = m.id === "wallet" && (wallet.data?.balance ?? 0) < total;
                 const enabled = m.configured && !walletShort;
@@ -306,26 +292,15 @@ export function CheckoutPage() {
                 return (
                   <label key={m.id} className={`pay-option${enabled ? "" : " is-disabled"}`}>
                     <input type="radio" name="pay" value={m.id} disabled={!enabled} checked={form.values.paymentProvider === m.id} onChange={() => form.set("paymentProvider", m.id)} />
-                    <span className="pay-logo" style={{ background: PAY_COLORS[m.id] }}>{PAY_SHORT[m.id]}</span>
+                    <PayLogo id={m.id} logo={m.logo} label={m.label} />
                     <span>
                       <strong style={{ display: "block" }}>{m.label}</strong>
                       <span className="faint" style={{ fontSize: 13 }}>{detail}</span>
                     </span>
-                    {!m.configured ? <span className="status status-neutral">Pendiente</span> : walletShort ? <Link className="btn btn-ghost btn-sm" to="/cuenta/billetera">Recargar</Link> : null}
+                    {walletShort ? <Link className="btn btn-ghost btn-sm" to="/cuenta/billetera">Recargar</Link> : null}
                   </label>
                 );
               })}
-              {store?.unavailableMethods.map((m) => (
-                <div key={m.id} className="pay-option is-disabled" aria-disabled="true">
-                  <input type="radio" disabled aria-label={m.label} />
-                  <span className="pay-logo" style={{ background: PAY_COLORS[m.id] }}>{PAY_SHORT[m.id]}</span>
-                  <span>
-                    <strong style={{ display: "block" }}>{m.label}</strong>
-                    <span className="faint" style={{ fontSize: 13 }}>{m.reason}</span>
-                  </span>
-                  <span className="status status-neutral">No disponible</span>
-                </div>
-              ))}
             </div>
             {form.errors.paymentProvider && <p className="field-error">{form.errors.paymentProvider}</p>}
             <div className="panel" style={{ padding: 16 }}>
@@ -348,8 +323,8 @@ export function CheckoutPage() {
           <Summary quote={quote}>
             <ul style={{ display: "grid", gap: 10, marginTop: 16 }}>
               {quote.items.map((i) => (
-                <li key={i.product.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13 }}>
-                  <span className="muted">{i.quantity} × {i.product.name}</span>
+                <li key={`${i.product.id}:${i.variant?.id ?? 0}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13 }}>
+                  <span className="muted">{i.quantity} × {i.product.name}{i.variant ? ` · ${i.variant.name}` : ""}</span>
                   <span className="num">{formatCOP(i.lineTotal)}</span>
                 </li>
               ))}
@@ -369,7 +344,7 @@ export function ConfirmationPage() {
   const { code = "" } = useParams();
   const [params] = useSearchParams();
   const location = useLocation();
-  const store = useStore();
+  const toast = useToast();
   const { user, ready } = useSession();
   useDocumentTitle(`Pedido ${code}`);
   const [order, setOrder] = useState<Order | null>(null);
@@ -432,10 +407,16 @@ export function ConfirmationPage() {
           {order.status === "completed" && <Alert kind="success">¡Listo! Tus datos de acceso ya están disponibles en el detalle del pedido.</Alert>}
           {paid && order.status !== "completed" && <Alert kind="success">Estamos preparando tu entrega. Verás los datos de acceso en el detalle del pedido cuando esté completado.</Alert>}
           {!paid && !cancelled && order.paymentProvider === "manual" && (
-            <Alert kind="info">
-              <strong>Pago por transferencia.</strong> {store?.store.manualPaymentInstructions}
-              <br />Valor exacto: <strong className="num">{formatCOP(order.total)}</strong> · Referencia: <strong className="num">{order.code}</strong>
-            </Alert>
+            <OrderManualPay
+              code={order.code}
+              total={order.total}
+              proof={order.proof}
+              onSubmit={async (d) => {
+                const r = await api.post<{ order: Order }>(`/api/orders/${order.code}/proof`, d);
+                setOrder(r.order);
+                toast("success", "Comprobante enviado. Te avisaremos cuando lo confirmemos.");
+              }}
+            />
           )}
           {!paid && !cancelled && order.paymentProvider !== "manual" && !rejected && (
             <Alert kind="warning">

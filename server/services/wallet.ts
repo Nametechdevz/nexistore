@@ -3,6 +3,7 @@ import { query, queryOne, toIso, transaction } from "../db.js";
 import { conflict, notFound } from "../lib/http.js";
 import { randomToken } from "../lib/security.js";
 import { notify } from "./notifications.js";
+import { privateUrl } from "./media.js";
 import { formatCOP } from "../../shared/pricing.js";
 
 export type WalletTxKind = "topup" | "purchase" | "refund" | "adjustment";
@@ -38,7 +39,10 @@ export async function walletSummary(userId: number) {
     [userId],
   );
   const topups = await query<Record<string, unknown>>(
-    "SELECT code, amount, provider, status, payment_currency, payment_amount_foreign, payment_ref, created_at, paid_at FROM wallet_topups WHERE user_id = ? ORDER BY id DESC LIMIT 20",
+    `SELECT t.code, t.amount, t.provider, t.status, t.payment_currency, t.payment_amount_foreign, t.payment_ref, t.created_at, t.paid_at,
+            t.proof_media_id, t.proof_reference, t.manual_account, t.review_note, t.reviewed_at, m.token AS proof_token, m.mime AS proof_mime
+       FROM wallet_topups t LEFT JOIN media m ON m.id = t.proof_media_id
+      WHERE t.user_id = ? ORDER BY t.id DESC LIMIT 20`,
     [userId],
   );
   return {
@@ -66,8 +70,37 @@ export const mapTopup = (t: Record<string, unknown>) => ({
   paymentRef: (t.payment_ref as string | null) ?? null,
   createdAt: toIso(t.created_at),
   paidAt: toIso(t.paid_at),
+  proofUrl: t.proof_media_id && t.proof_token ? privateUrl(Number(t.proof_media_id), t.proof_token as string, t.proof_mime as string) : null,
+  proofReference: (t.proof_reference as string | null) ?? null,
+  manualAccount: (t.manual_account as string | null) ?? null,
+  reviewNote: (t.review_note as string | null) ?? null,
+  reviewedAt: toIso(t.reviewed_at),
+  /** La misma referencia aparece en otra recarga: posible comprobante repetido. */
+  duplicateRef: Number(t.dup_ref ?? 0) > 0,
   customer: t.email ? { id: t.user_id, name: t.name, email: t.email } : undefined,
 });
+
+/** Rechaza una recarga por transferencia (comprobante inválido) y avisa al cliente. */
+export async function rejectTopup(code: string, reason: string): Promise<boolean> {
+  const t = await transaction(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT id, user_id, amount, status, provider FROM wallet_topups WHERE code = ? FOR UPDATE", [code]);
+    const r = rows[0];
+    if (!r || r.status !== "pending" || r.provider !== "manual") return null;
+    await conn.execute("UPDATE wallet_topups SET status = 'rejected', review_note = ?, reviewed_at = UTC_TIMESTAMP() WHERE id = ?", [reason.slice(0, 255), r.id]);
+    return { userId: r.user_id as number, amount: Number(r.amount) };
+  });
+  if (!t) return false;
+  await notify({
+    audience: "user",
+    userId: t.userId,
+    kind: "wallet",
+    title: `Recarga de ${formatCOP(t.amount)} rechazada`,
+    body: `No pudimos validar tu comprobante: ${reason}. Si crees que es un error, escríbenos a soporte.`,
+    link: "/cuenta/billetera",
+    email: true,
+  });
+  return true;
+}
 
 export function newTopupCode(): string {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -80,7 +113,7 @@ export async function creditTopup(code: string, opts: { actor: string; paymentRe
     const [rows] = await conn.query<RowDataPacket[]>("SELECT id, user_id, amount, status FROM wallet_topups WHERE code = ? FOR UPDATE", [code]);
     const t = rows[0];
     if (!t || t.status !== "pending") return null;
-    await conn.execute("UPDATE wallet_topups SET status = 'paid', paid_at = UTC_TIMESTAMP(), payment_ref = COALESCE(?, payment_ref) WHERE id = ?", [
+    await conn.execute("UPDATE wallet_topups SET status = 'paid', paid_at = UTC_TIMESTAMP(), reviewed_at = UTC_TIMESTAMP(), payment_ref = COALESCE(?, payment_ref) WHERE id = ?", [
       opts.paymentRef ?? null,
       t.id,
     ]);

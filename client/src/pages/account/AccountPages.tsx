@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Icon } from "../../components/Icon";
+import { OrderManualPay } from "../../components/ManualPay";
 import {
   Alert, Check, ConfirmModal, Empty, ErrorState, Modal, Pagination, ProductArt, Skeleton, Spinner, StatusBadge, Stars, SubmitButton, TextField,
 } from "../../components/ui";
@@ -143,7 +144,7 @@ export function OrdersPage() {
                 <div className="order-card-body">
                   <ProductArt glyph={o.items[0]?.artGlyph ?? "N"} color={o.items[0]?.artColor ?? "#e3122c"} showName={false} />
                   <div style={{ minWidth: 0 }}>
-                    <strong>{o.items[0]?.productName}</strong>
+                    <strong>{o.items[0]?.productName}{o.items[0]?.variantName ? ` · ${o.items[0].variantName}` : ""}</strong>
                     <p className="faint" style={{ fontSize: 13 }}>
                       {o.items[0]?.productSummary}
                       {o.items.length > 1 && ` · y ${o.items.length - 1} producto${o.items.length > 2 ? "s" : ""} más`}
@@ -204,7 +205,6 @@ export function OrderDetailPage() {
   const { code = "" } = useParams();
   useDocumentTitle(`Pedido ${code}`);
   const toast = useToast();
-  const store = useStore();
   const navigate = useNavigate();
   const q = useQuery(() => api.get<{ order: Order; reviewedProductIds: number[] }>(`/api/orders/${encodeURIComponent(code)}`), [code]);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -260,9 +260,18 @@ export function OrderDetailPage() {
       {o.status === "pending_payment" && (
         <div style={{ marginBottom: 20 }}>
           {o.paymentProvider === "manual" ? (
-            <Alert kind="info">
-              <strong>Pendiente de pago por transferencia.</strong> {store?.store.manualPaymentInstructions} Referencia: <strong className="num">{o.code}</strong>.
-            </Alert>
+            <div className="panel">
+              <OrderManualPay
+                code={o.code}
+                total={o.total}
+                proof={o.proof}
+                onSubmit={async (d) => {
+                  await api.post(`/api/orders/${o.code}/proof`, d);
+                  toast("success", "Comprobante enviado. Te avisaremos cuando lo confirmemos.");
+                  await q.reload();
+                }}
+              />
+            </div>
           ) : (
             <Alert kind="warning">Este pedido está esperando la confirmación del pago. Los pedidos sin pagar se cancelan automáticamente a las 48 horas.</Alert>
           )}
@@ -285,6 +294,7 @@ export function OrderDetailPage() {
               <ProductArt glyph={it.artGlyph} color={it.artColor ?? "#e3122c"} showName={false} />
               <div style={{ minWidth: 0 }}>
                 {it.productSlug ? <Link to={`/producto/${it.productSlug}`} style={{ fontWeight: 700 }}>{it.productName}</Link> : <strong>{it.productName}</strong>}
+                {it.variantName && <span className="variant-tag" style={{ marginLeft: 8 }}>{it.variantName}</span>}
                 <p className="pcard-meta">{it.productSummary} · {it.quantity} × {formatCOP(it.unitPrice)}</p>
                 {it.deliveryContent && (
                   <div style={{ marginTop: 10 }}>

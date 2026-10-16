@@ -98,8 +98,8 @@ export function HomePage() {
               Array.from({ length: 10 }, (_, i) => <div key={i} className="skel" style={{ height: 112, borderRadius: 12 }} />)}
             {cats.data?.items.map((c) => (
               <Link key={c.id} to={`/categorias/${c.slug}`} className="cat-chip" style={{ ["--hue" as string]: c.color }}>
-                <span className="cat-icon">
-                  <Icon name={c.icon} />
+                <span className={`cat-icon${c.imageUrl ? " has-img" : ""}`}>
+                  {c.imageUrl ? <img src={c.imageUrl} alt="" className="cat-img" loading="lazy" /> : <Icon name={c.icon} />}
                 </span>
                 {c.name}
               </Link>

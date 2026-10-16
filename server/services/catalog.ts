@@ -1,7 +1,7 @@
 import type { PoolConnection } from "mysql2/promise";
 import { query, queryOne, toBool, toIso } from "../db.js";
 import { likeEscape } from "../lib/http.js";
-import type { Category, ProductDetail, ProductSummary } from "../../shared/types.js";
+import type { Category, ProductDetail, ProductSummary, ProductVariant } from "../../shared/types.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -11,7 +11,8 @@ export const PRODUCT_COLUMNS = `
   p.delivery_mode, p.duration_days, p.low_stock_threshold,
   c.slug AS category_slug, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
   (SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.product_id = p.id) AS rating_avg,
-  (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.id) AS rating_count`;
+  (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.id) AS rating_count,
+  (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) AS variant_count`;
 
 export function mapProduct(r: any): ProductSummary {
   return {
@@ -34,7 +35,58 @@ export function mapProduct(r: any): ProductSummary {
     ratingCount: Number(r.rating_count ?? 0),
     deliveryMode: r.delivery_mode === "auto" ? "auto" : "manual",
     durationDays: r.duration_days === null || r.duration_days === undefined ? null : Number(r.duration_days),
+    hasVariants: Number(r.variant_count ?? 0) > 0,
   };
+}
+
+/**
+ * Opciones de varios productos. En entrega automática el inventario de cada opción son sus cuentas
+ * disponibles más las compartidas (variant_id NULL); en manual, el stock propio de la opción.
+ */
+export async function getVariants(productIds: number[], opts: { conn?: PoolConnection; includeInactive?: boolean; lock?: boolean } = {}): Promise<Map<number, ProductVariant[]>> {
+  const map = new Map<number, ProductVariant[]>();
+  if (!productIds.length) return map;
+  const sql = `SELECT v.*, p.delivery_mode,
+          (SELECT COUNT(*) FROM inventory_items i WHERE i.product_id = v.product_id AND i.status = 'available'
+             AND (i.variant_id = v.id OR i.variant_id IS NULL)) AS auto_stock
+       FROM product_variants v JOIN products p ON p.id = v.product_id
+      WHERE v.product_id IN (${productIds.map(() => "?").join(",")}) ${opts.includeInactive ? "" : "AND v.is_active = 1"}
+      ORDER BY v.sort_order, v.id ${opts.lock ? "FOR UPDATE" : ""}`;
+  const rows = opts.conn ? ((await opts.conn.query(sql, productIds))[0] as any[]) : await query<any>(sql, productIds);
+  for (const r of rows) {
+    const list = map.get(r.product_id) ?? [];
+    list.push({
+      id: r.id,
+      name: r.name,
+      price: Number(r.price),
+      compareAtPrice: r.compare_at_price ? Number(r.compare_at_price) : null,
+      stock: r.delivery_mode === "auto" ? Number(r.auto_stock) : Number(r.stock),
+      durationDays: r.duration_days === null ? null : Number(r.duration_days),
+      isActive: toBool(r.is_active),
+    });
+    map.set(r.product_id, list);
+  }
+  return map;
+}
+
+/**
+ * Con opciones activas, el producto refleja la más barata (precio «Desde» en el catálogo) y el
+ * inventario total. Sin opciones no cambia nada.
+ */
+export async function syncProductFromVariants(conn: PoolConnection, productId: number) {
+  const [rows] = (await conn.query(
+    "SELECT price, compare_at_price, stock FROM product_variants WHERE product_id = ? AND is_active = 1 ORDER BY price, sort_order, id",
+    [productId],
+  )) as unknown as [any[]];
+  if (!rows.length) return;
+  const cheapest = rows[0];
+  const manualStock = rows.reduce((s: number, r: any) => s + Number(r.stock), 0);
+  await conn.execute(
+    `UPDATE products SET price = ?, compare_at_price = ?,
+            stock = IF(delivery_mode = 'auto', (SELECT COUNT(*) FROM inventory_items WHERE product_id = ? AND status = 'available'), ?)
+      WHERE id = ?`,
+    [cheapest.price, cheapest.compare_at_price, productId, manualStock, productId],
+  );
 }
 
 /** Galería guardada como JSON; los productos antiguos solo tienen image_url. */
@@ -58,6 +110,7 @@ export function mapCategory(r: any): Category {
     color: r.color,
     sortOrder: r.sort_order,
     isActive: toBool(r.is_active),
+    imageUrl: r.image_url || null,
     productCount: r.product_count === undefined ? undefined : Number(r.product_count),
   };
 }
@@ -157,6 +210,7 @@ export async function getProductBySlug(slug: string, includeInactive = false): P
     durationLabel: r.duration_label,
     accountLabel: r.account_label,
     images: parseGallery(r.gallery, r.image_url),
+    variants: (await getVariants([r.id])).get(r.id) ?? [],
     categoryId: r.category_id,
     isActive: toBool(r.is_active),
     reviews: reviews.map((v) => ({

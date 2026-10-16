@@ -1,7 +1,7 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { z } from "zod";
 import { execute, query, queryOne, toBool, toIso, transaction } from "../db.js";
-import { ah, HttpError, intParam, notFound, parse } from "../lib/http.js";
+import { ah, badRequest, HttpError, intParam, notFound, parse } from "../lib/http.js";
 import { hashPassword, verifyPassword } from "../lib/security.js";
 import { requireAuth } from "../middleware/session.js";
 import { PAYMENT_PROVIDERS } from "../../shared/constants.js";
@@ -11,6 +11,9 @@ import { listNotifications, markRead, notify } from "../services/notifications.j
 import { applyVerifiedPayment } from "../services/orders.js";
 import { addMessage, createTicket, getTicket, listTickets } from "../services/support.js";
 import { newTopupCode, walletSummary } from "../services/wallet.js";
+import { MAX_MEDIA_BYTES, ownedProofId, saveMedia, sniffImage } from "../services/media.js";
+import { accountSnapshot, findManualAccount } from "../services/manual-pay.js";
+import { formatCOP } from "../../shared/pricing.js";
 
 export const accountRouter = Router();
 accountRouter.use(requireAuth);
@@ -227,6 +230,25 @@ accountRouter.post(
   }),
 );
 
+/* ---------- Comprobantes ---------- */
+
+/** Sube la imagen de un comprobante (privada: solo la ve el cliente y los administradores). */
+accountRouter.post(
+  "/proofs",
+  express.raw({ type: () => true, limit: MAX_MEDIA_BYTES }),
+  ah(async (req, res) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!buf?.length) throw badRequest("No llegó ninguna imagen.");
+    if (!sniffImage(buf)) throw badRequest("Formato no admitido. Usa una imagen JPG, PNG o WebP.");
+    const recent = await queryOne<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM media WHERE owner_id = ? AND is_private = 1 AND created_at > (UTC_TIMESTAMP() - INTERVAL 1 HOUR)",
+      [req.user!.id],
+    );
+    if (Number(recent?.n) >= 15) throw new HttpError(429, "Subiste muchos comprobantes en poco tiempo. Inténtalo más tarde.");
+    res.status(201).json(await saveMedia(buf, req.user!.id, { private: true }));
+  }),
+);
+
 /* ---------- Billetera ---------- */
 
 accountRouter.get(
@@ -243,14 +265,28 @@ accountRouter.post(
     const ready = await isProviderReady(data.provider);
     const adapter = adapters[data.provider];
     if (!ready.ok) throw new HttpError(422, `${adapter.label} no está disponible.`, { provider: ready.reason ?? "" });
+    // Transferencia: exige la cuenta usada, la referencia y la imagen del comprobante.
+    let manual: { mediaId: number; reference: string; account: string } | null = null;
+    if (data.provider === "manual") {
+      const fields: Record<string, string> = {};
+      const account = data.accountId ? await findManualAccount(data.accountId) : null;
+      if (!account) fields.accountId = "Elige la cuenta a la que transferiste.";
+      const reference = (data.reference ?? "").trim();
+      if (reference.length < 4) fields.reference = "Escribe la referencia o número del comprobante.";
+      const mediaId = data.proofUrl ? await ownedProofId(data.proofUrl, req.user!.id) : null;
+      if (!mediaId) fields.proofUrl = "Sube la imagen del comprobante.";
+      if (Object.keys(fields).length) throw new HttpError(422, "Completa los datos del comprobante.", fields);
+      manual = { mediaId: mediaId!, reference, account: accountSnapshot(account!) };
+    }
     const pending = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM wallet_topups WHERE user_id = ? AND status = 'pending'", [req.user!.id]);
     if (Number(pending?.n) >= 3) throw new HttpError(429, "Tienes 3 recargas pendientes. Complétalas o espera a que venzan.");
     const quote = await foreignQuoteFor(data.provider);
     const foreign = quote ? quote(data.amount) : null;
     const code = newTopupCode();
     await execute(
-      "INSERT INTO wallet_topups (code, user_id, amount, provider, payment_currency, payment_amount_foreign) VALUES (?, ?, ?, ?, ?, ?)",
-      [code, req.user!.id, data.amount, data.provider, foreign?.currency ?? null, foreign?.amount ?? null],
+      `INSERT INTO wallet_topups (code, user_id, amount, provider, payment_currency, payment_amount_foreign, proof_media_id, proof_reference, manual_account)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [code, req.user!.id, data.amount, data.provider, foreign?.currency ?? null, foreign?.amount ?? null, manual?.mediaId ?? null, manual?.reference ?? null, manual?.account ?? null],
     );
     const u = req.user!;
     let action;
@@ -274,7 +310,14 @@ accountRouter.post(
       await execute("UPDATE wallet_topups SET payment_ref = ? WHERE code = ?", [action.externalRef, code]);
     }
     if (data.provider === "manual") {
-      await notify({ audience: "admin", kind: "topup", title: `Recarga por transferencia pendiente: ${code}`, body: `${u.name} · ${data.amount} COP`, link: "/admin/billetera" });
+      await notify({
+        audience: "admin",
+        kind: "topup",
+        title: `Recarga por revisar: ${formatCOP(data.amount)}`,
+        body: `${u.name} · ${manual?.account ?? ""} · ref. ${manual?.reference ?? ""}`,
+        link: "/admin/billetera",
+        email: true,
+      });
     }
     res.status(201).json({ code, action, foreign });
   }),

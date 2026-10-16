@@ -111,8 +111,23 @@ Hay una campana en la tienda y otra en el panel. Las alertas importantes tambié
 | Vencidas | — | Se marcan solas y salen del stock |
 | Cuenta caída / reemplazada / reembolsos / respuestas de soporte | Cliente o admin | Al ocurrir |
 
+## Variaciones de producto
+
+En *Admin → Productos → Editar → Opciones del producto* cada producto puede tener hasta 20 opciones (por ejemplo «1 mes», «3 meses», «1 año»), cada una con su precio, precio anterior, inventario y duración en días. El catálogo muestra «Desde» el precio más bajo y en la ficha el cliente elige la opción. Con entrega automática, las cuentas se cargan para una opción concreta o como **compartidas** (sirven para cualquier opción); al vender se usan primero las de la opción. La duración de la opción define el fin del servicio del cliente. Quitar una opción con pedidos la desactiva en vez de borrarla.
+
+## Pagos por transferencia con comprobante
+
+1. En *Configuración → Cuentas para transferencias* agrega tus cuentas: Nequi, Daviplata, llave Bre-B, cuenta bancaria o una imagen QR.
+2. Activa «Transferencias» en *Pagos, correo y acceso*. Sin al menos una cuenta visible, el método no aparece.
+3. El cliente transfiere (en un pedido o en una recarga de billetera), elige la cuenta, escribe la referencia y sube la imagen del comprobante. La imagen es **privada**: solo la ven el cliente y los administradores.
+4. Recibes una notificación (y un correo, si el SMTP está configurado). En *Billetera* o en el *pedido* ves el comprobante y puedes **acreditar/confirmar** o **rechazar con un motivo**. El panel avisa si la misma referencia ya se usó en otra recarga.
+5. El cliente recibe la notificación del resultado, en la tienda y por correo.
+
+En *Configuración → Logos de los métodos de pago* subes el logo y el nombre visible de cada método. En la tienda solo aparecen los métodos activos.
+
 ## Imágenes
 
+- **Categorías:** cada categoría puede tener su propia imagen (reemplaza el ícono).
 - **Productos:** en *Admin → Productos → Editar* se suben hasta 8 imágenes (JPG, PNG, WebP o GIF), con arrastrar y soltar. La primera es la principal y las flechas cambian el orden. La ficha del producto muestra la galería. Sin imágenes se usa el arte generado con el monograma y el color.
 - **Fondos de la tienda:** en *Admin → Configuración → Campaña de temporada* se suben los fondos de la portada, del inicio de sesión y del banner de ofertas. Si quedan vacíos y la campaña está activa, se usa la ilustración navideña incluida (`client/public/art/navidad.jpg`).
 - El navegador reduce cada imagen (máx. 1600–2400 px) y la convierte a WebP antes de subirla; así se eliminan los metadatos. El servidor comprueba la firma real del archivo y no admite SVG. Las imágenes se guardan **en la base de datos** (tabla `media`), así que no se pierden al subir un ZIP nuevo, y se sirven en `/media/…` con caché de un año. Cada hora se borran las que ya no usa ningún producto ni fondo.

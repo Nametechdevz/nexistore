@@ -4,7 +4,7 @@ import { Icon } from "../components/Icon";
 import { ProductCard } from "../components/ProductCard";
 import { Empty, ErrorState, Price, ProductArt, QtyStepper, Skeleton, Stars } from "../components/ui";
 import { api } from "../lib/api";
-import { formatDate } from "../lib/format";
+import { formatCOP, formatDate } from "../lib/format";
 import { useDocumentTitle, useQuery } from "../lib/hooks";
 import { useCart, useStore, useToast } from "../lib/state";
 import type { ProductDetail, ProductSummary } from "../../../shared/types";
@@ -22,8 +22,10 @@ export function ProductPage() {
   const store = useStore();
   const navigate = useNavigate();
   const [view, setView] = useState(0);
+  const [variantId, setVariantId] = useState<number | null>(null);
   useEffect(() => {
     setView(0);
+    setVariantId(null);
   }, [slug]);
   const [qty, setQty] = useState(1);
 
@@ -55,9 +57,15 @@ export function ProductPage() {
       </div>
     );
 
-  const inCart = cart.lines.find((l) => l.productId === p.id)?.quantity ?? 0;
-  const maxAllowed = Math.max(0, Math.min(p.maxPerOrder, p.stock) - inCart);
-  const soldOut = p.stock <= 0;
+  // Opción elegida: la seleccionada o, por defecto, la primera con inventario.
+  const variants = p.variants ?? [];
+  const selected = variants.length ? (variants.find((v) => v.id === variantId) ?? variants.find((v) => v.stock > 0) ?? variants[0]!) : null;
+  const price = selected?.price ?? p.price;
+  const compareAt = selected ? selected.compareAtPrice : p.compareAtPrice;
+  const stock = selected?.stock ?? p.stock;
+  const inCart = cart.lines.find((l) => l.productId === p.id && (l.variantId ?? null) === (selected?.id ?? null))?.quantity ?? 0;
+  const maxAllowed = Math.max(0, Math.min(p.maxPerOrder, stock) - inCart);
+  const soldOut = stock <= 0;
   // Imágenes subidas por el administrador; si no hay, 3 composiciones del arte propio.
   const images = p.images?.length ? p.images : p.imageUrl ? [p.imageUrl] : [];
   const views = [
@@ -67,8 +75,8 @@ export function ProductPage() {
   ];
 
   const add = (goToCart: boolean) => {
-    cart.add(p.id, Math.min(qty, maxAllowed), Math.min(p.maxPerOrder, p.stock));
-    toast("success", `${p.name} se agregó al carrito.`);
+    cart.add(p.id, Math.min(qty, maxAllowed), Math.min(p.maxPerOrder, stock), selected?.id ?? null);
+    toast("success", `${p.name}${selected ? ` (${selected.name})` : ""} se agregó al carrito.`);
     setQty(1);
     if (goToCart) navigate("/carrito");
   };
@@ -134,11 +142,43 @@ export function ProductPage() {
               <span>Aún sin valoraciones</span>
             )}
           </div>
-          <Price price={p.price} compareAt={p.compareAtPrice} size="lg" />
+          <Price price={price} compareAt={compareAt} size="lg" />
+          {variants.length > 0 && (
+            <div className="variant-picker">
+              <span className="label">Elige una opción</span>
+              <div className="variant-options" role="radiogroup" aria-label="Opciones del producto">
+                {variants.map((v) => {
+                  const off = v.compareAtPrice && v.compareAtPrice > v.price ? Math.round((1 - v.price / v.compareAtPrice) * 100) : 0;
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected?.id === v.id}
+                      className="variant-opt"
+                      disabled={v.stock <= 0}
+                      onClick={() => {
+                        setVariantId(v.id);
+                        setQty(1);
+                      }}
+                    >
+                      {off > 0 && <span className="badge-off">-{off}%</span>}
+                      <strong>{v.name}</strong>
+                      <span>
+                        <span className="num">{formatCOP(v.price)}</span>
+                        {v.compareAtPrice ? <s className="num">{formatCOP(v.compareAtPrice)}</s> : null}
+                      </span>
+                      <small>{v.stock <= 0 ? "Agotado" : v.stock <= 5 ? `Quedan ${v.stock}` : v.durationDays ? `${v.durationDays} días de servicio` : "Disponible"}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <ul className="feature-list">
-            {p.durationLabel && (
+            {(selected?.durationDays || p.durationLabel) && (
               <li>
-                <Icon name="clock" /> {p.durationLabel}
+                <Icon name="clock" /> {selected?.durationDays ? `${selected.durationDays} días de servicio` : p.durationLabel}
               </li>
             )}
             {p.accountLabel && (
@@ -154,7 +194,7 @@ export function ProductPage() {
             </li>
             <li>
               <Icon name="package" />
-              {soldOut ? <span style={{ color: "var(--text-3)" }}>Agotado</span> : p.stock <= 5 ? <span style={{ color: "var(--warning)" }}>Últimas {p.stock} unidades</span> : <span>Disponible</span>}
+              {soldOut ? <span style={{ color: "var(--text-3)" }}>Agotado</span> : stock <= 5 ? <span style={{ color: "var(--warning)" }}>Últimas {stock} unidades</span> : <span>Disponible</span>}
             </li>
           </ul>
           {soldOut ? (

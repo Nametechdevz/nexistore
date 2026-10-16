@@ -121,7 +121,7 @@ describe("carrito y pedidos", () => {
     const s = await product("suite-ofimatica-pro");
     await u.put("/api/cart").send({ items: [{ productId: p.id, quantity: 1 }] }).expect(200);
     const merged = await u.put("/api/cart").send({ mode: "merge", items: [{ productId: p.id, quantity: 1 }, { productId: s.id, quantity: 1 }] });
-    expect(merged.body.items).toEqual(expect.arrayContaining([{ productId: p.id, quantity: 2 }, { productId: s.id, quantity: 1 }]));
+    expect(merged.body.items).toEqual(expect.arrayContaining([{ productId: p.id, quantity: 2, variantId: null }, { productId: s.id, quantity: 1, variantId: null }]));
     const quote = await u.post("/api/cart/quote").send({ items: [{ productId: p.id, quantity: 1 }, { productId: s.id, quantity: 1 }], couponCode: "NAVIDAD10" });
     expect(quote.body.subtotal).toBe(p.price + s.price);
     expect(quote.body.discount).toBe(Math.round((p.price + s.price) * 0.1));

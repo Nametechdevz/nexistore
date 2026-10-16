@@ -5,14 +5,15 @@ import { execute, query, queryOne, toIso, transaction } from "../db.js";
 import { ah, badRequest, conflict, HttpError, intParam, likeEscape, notFound, pageParams, parse } from "../lib/http.js";
 import { open, requireVault, vaultConfigured } from "../lib/vault.js";
 import { requireAdmin } from "../middleware/session.js";
+import { getVariants, syncProductFromVariants } from "../services/catalog.js";
 import { inventorySummary, markFallen, notifyReplacement, replaceItem, sealContent, syncAutoStock } from "../services/inventory.js";
 import { checkLowStock, listNotifications, markRead, notify, runAlerts } from "../services/notifications.js";
 import { addMessage, getTicket, listTickets, resolveIssue, suggestedRefund } from "../services/support.js";
-import { creditTopup, mapTopup, moveWallet, newTopupCode } from "../services/wallet.js";
+import { creditTopup, mapTopup, moveWallet, newTopupCode, rejectTopup } from "../services/wallet.js";
 import { INVENTORY_STATUSES } from "../../shared/constants.js";
 import { formatCOP } from "../../shared/pricing.js";
 import {
-  adminTopupSchema, inventoryBulkSchema, inventoryFallSchema, MANUAL_TOPUP_METHODS, inventoryUpdateSchema, resolveTicketSchema, ticketAdminMessageSchema, walletAdjustSchema,
+  adminTopupSchema, rejectProofSchema, inventoryBulkSchema, inventoryFallSchema, MANUAL_TOPUP_METHODS, inventoryUpdateSchema, resolveTicketSchema, ticketAdminMessageSchema, walletAdjustSchema,
 } from "../../shared/schemas.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -28,6 +29,7 @@ adminOpsRouter.get(
   "/inventory/summary",
   ah(async (_req, res) => {
     const rows = await inventorySummary();
+    const variants = await getVariants(rows.map((r: any) => r.id));
     res.json({
       vault: vaultConfigured(),
       items: rows.map((r: any) => ({
@@ -43,6 +45,7 @@ adminOpsRouter.get(
         fallen: Number(r.fallen ?? 0),
         expired: Number(r.expired ?? 0),
         expiring: Number(r.expiring ?? 0),
+        variants: (variants.get(r.id) ?? []).map((v) => ({ id: v.id, name: v.name, available: v.stock })),
       })),
     });
   }),
@@ -76,11 +79,13 @@ adminOpsRouter.get(
     }
     const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const from = `FROM inventory_items i JOIN products p ON p.id = i.product_id
+                  LEFT JOIN product_variants iv ON iv.id = i.variant_id
                   LEFT JOIN users u ON u.id = i.customer_id
-                  LEFT JOIN order_items oi ON oi.id = i.order_item_id LEFT JOIN orders o ON o.id = oi.order_id`;
+                  LEFT JOIN order_items oi ON oi.id = i.order_item_id LEFT JOIN orders o ON o.id = oi.order_id
+                  LEFT JOIN product_variants ov ON ov.id = oi.variant_id`;
     const rows = await query<any>(
       `SELECT i.id, i.label, i.status, i.expires_at, i.sold_at, i.service_ends_at, i.notes, i.created_at, i.product_id,
-              p.name AS product_name, u.name AS customer_name, u.email AS customer_email, o.code AS order_code
+              p.name AS product_name, COALESCE(ov.name, iv.name) AS variant_name, u.name AS customer_name, u.email AS customer_email, o.code AS order_code
          ${from} ${w} ORDER BY FIELD(i.status,'sold','reserved','available','fallen','expired','disabled'), i.expires_at IS NULL, i.expires_at, i.id DESC
         LIMIT ? OFFSET ?`,
       [...params, pageSize, offset],
@@ -93,6 +98,8 @@ adminOpsRouter.get(
         status: r.status,
         productId: r.product_id,
         productName: r.product_name,
+        /** Opción vendida, o la opción a la que pertenece la cuenta (null = compartida). */
+        variantName: r.variant_name ?? null,
         expiresAt: toIso(r.expires_at),
         soldAt: toIso(r.sold_at),
         serviceEndsAt: toIso(r.service_ends_at),
@@ -130,6 +137,9 @@ adminOpsRouter.post(
     const p = await queryOne<{ id: number; delivery_mode: string }>("SELECT id, delivery_mode FROM products WHERE id = ?", [d.productId]);
     if (!p) throw notFound("Producto no encontrado.");
     if (p.delivery_mode !== "auto") throw conflict("Activa la «entrega automática» en el producto antes de cargar cuentas.");
+    if (d.variantId && !(await queryOne("SELECT id FROM product_variants WHERE id = ? AND product_id = ?", [d.variantId, d.productId]))) {
+      throw badRequest("La opción no pertenece a este producto.", { variantId: "Opción inválida." });
+    }
     const lines = d.lines.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (lines.length > 1000) throw badRequest("Máximo 1.000 cuentas por carga.");
     const parsed = lines.map((line, idx) => {
@@ -142,9 +152,10 @@ adminOpsRouter.post(
     });
     await transaction(async (conn) => {
       for (const it of parsed) {
-        await conn.execute("INSERT INTO inventory_items (product_id, label, content, expires_at) VALUES (?, ?, ?, ?)", [d.productId, it.label, it.content, it.expires]);
+        await conn.execute("INSERT INTO inventory_items (product_id, variant_id, label, content, expires_at) VALUES (?, ?, ?, ?, ?)", [d.productId, d.variantId, it.label, it.content, it.expires]);
       }
       await syncAutoStock(conn, d.productId);
+      await syncProductFromVariants(conn, d.productId);
     });
     res.status(201).json({ created: parsed.length });
   }),
@@ -244,9 +255,12 @@ adminOpsRouter.post(
 adminOpsRouter.get(
   "/wallet/topups",
   ah(async (req, res) => {
-    const status = ["pending", "paid", "cancelled"].includes(String(req.query.status)) ? String(req.query.status) : null;
+    const status = ["pending", "paid", "cancelled", "rejected"].includes(String(req.query.status)) ? String(req.query.status) : null;
     const rows = await query<any>(
-      `SELECT t.*, u.name, u.email FROM wallet_topups t JOIN users u ON u.id = t.user_id
+      `SELECT t.*, u.name, u.email, m.token AS proof_token, m.mime AS proof_mime,
+              (SELECT COUNT(*) FROM wallet_topups t2 WHERE t.proof_reference IS NOT NULL AND t2.proof_reference = t.proof_reference
+                 AND t2.id <> t.id AND t2.status IN ('pending','paid')) AS dup_ref
+         FROM wallet_topups t JOIN users u ON u.id = t.user_id LEFT JOIN media m ON m.id = t.proof_media_id
         ${status ? "WHERE t.status = ?" : ""} ORDER BY t.status = 'pending' DESC, t.id DESC LIMIT 100`,
       status ? [status] : [],
     );
@@ -264,6 +278,16 @@ adminOpsRouter.post(
     if (t.provider !== "manual") throw conflict("Las recargas por pasarela se acreditan solas con la confirmación verificada del proveedor.");
     if (t.status !== "pending") throw conflict("La recarga no está pendiente.");
     await creditTopup(String(req.params.code), { actor: "admin", paymentRef: `admin-${req.user!.id}` });
+    res.json({ ok: true });
+  }),
+);
+
+/** Rechaza una recarga por transferencia (comprobante inválido o dinero no recibido). */
+adminOpsRouter.post(
+  "/wallet/topups/:code/reject",
+  ah(async (req, res) => {
+    const { reason } = parse(rejectProofSchema, req.body);
+    if (!(await rejectTopup(String(req.params.code), reason))) throw conflict("La recarga no está pendiente.");
     res.json({ ok: true });
   }),
 );

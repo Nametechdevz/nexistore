@@ -8,8 +8,9 @@ import { useDebounced, useDocumentTitle, useForm, useQuery } from "../../lib/hoo
 import { useSession, useToast } from "../../lib/state";
 import { OrdersTable } from "./AdminCatalog";
 import { CustomerWalletModal } from "./AdminExtra";
-import { IntegrationsSettings } from "./AdminIntegrations";
+import { IntegrationsSettings, ManualAccountsSettings, PaymentDisplaySettings } from "./AdminIntegrations";
 import { ImageUploader } from "../../components/ImageUploader";
+import { RejectProofModal } from "./AdminExtra";
 import { ORDER_STATUSES, ORDER_TRANSITIONS, type OrderStatus } from "../../../../shared/constants";
 import { campaignSchema, couponInputSchema, postInputSchema, storeSettingsSchema } from "../../../../shared/schemas";
 import type { Order, PaymentMethodInfo } from "../../../../shared/types";
@@ -64,6 +65,7 @@ export function AdminOrderDetail() {
   const [refundToWallet, setRefundToWallet] = useState(true);
   const [busy, setBusy] = useState(false);
   const [delivery, setDelivery] = useState<Record<number, string>>({});
+  const [rejectingProof, setRejectingProof] = useState(false);
 
   useEffect(() => {
     if (q.data) setDelivery(Object.fromEntries(q.data.order.items.filter((i) => i.deliveryMode !== "auto").map((i) => [i.id, i.deliveryContent ?? ""])));
@@ -114,6 +116,46 @@ export function AdminOrderDetail() {
         </div>
         <StatusBadge status={o.status} />
       </div>
+      {o.paymentProvider === "manual" && o.status === "pending_payment" && (
+        <div className="panel proof-panel" style={{ marginBottom: 20 }}>
+          <div className="panel-head"><h3>Comprobante de transferencia</h3></div>
+          {o.proof?.url ? (
+            <div className="proof-review">
+              <a href={o.proof.url} target="_blank" rel="noreferrer" className="proof-big" title="Abrir en grande">
+                <img src={o.proof.url} alt="Comprobante del cliente" />
+              </a>
+              <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
+                <p><span className="faint">Cuenta:</span> <strong>{o.proof.account}</strong></p>
+                <p><span className="faint">Referencia:</span> <strong className="num">{o.proof.reference}</strong></p>
+                <p><span className="faint">Valor del pedido:</span> <strong className="num">{formatCOP(o.total)}</strong></p>
+                <p className="hint">Enviado {formatDateTime(o.proof.submittedAt)}. Verifica en tu cuenta que el dinero llegó por el valor exacto antes de confirmar.</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-primary" onClick={() => setTarget("paid")}><Icon name="check" /> Confirmar pago</button>
+                  <button className="btn btn-outline" onClick={() => setRejectingProof(true)}><Icon name="x" /> Rechazar comprobante</button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 14 }}>El cliente aún no ha enviado el comprobante. Puedes confirmar el pago igualmente si ya verificaste la transferencia.</p>
+          )}
+        </div>
+      )}
+      {rejectingProof && (
+        <RejectProofModal
+          title="Rechazar comprobante"
+          onClose={() => setRejectingProof(false)}
+          onReject={async (reason) => {
+            try {
+              await api.post(`/api/admin/orders/${o.code}/reject-proof`, { reason });
+              toast("success", "Comprobante rechazado. El cliente fue notificado y puede enviar otro.");
+              setRejectingProof(false);
+              await q.reload();
+            } catch (e) {
+              toast("error", e instanceof ApiError ? e.message : "Error");
+            }
+          }}
+        />
+      )}
       {allowed.length > 0 && (
         <div className="panel" style={{ marginBottom: 20 }}>
           <div className="panel-head"><h3>Cambiar estado</h3></div>
@@ -137,7 +179,7 @@ export function AdminOrderDetail() {
             <div key={it.id} style={{ display: "grid", gap: 10, padding: "14px 0", borderBottom: "1px solid var(--line)" }}>
               <div className="cell-product">
                 <ProductArt glyph={it.artGlyph} color={it.artColor ?? "#e3122c"} showName={false} />
-                <div style={{ flex: 1 }}><strong>{it.productName}</strong><div className="faint" style={{ fontSize: 12 }}>{it.quantity} × {formatCOP(it.unitPrice)}</div></div>
+                <div style={{ flex: 1 }}><strong>{it.productName}</strong>{it.variantName && <span className="variant-tag" style={{ marginLeft: 8 }}>{it.variantName}</span>}<div className="faint" style={{ fontSize: 12 }}>{it.quantity} × {formatCOP(it.unitPrice)}</div></div>
                 <strong className="num">{formatCOP(it.unitPrice * it.quantity)}</strong>
               </div>
               {it.deliveryMode === "auto" ? (
@@ -553,7 +595,16 @@ export function AdminReports() {
 export function AdminSettings() {
   useDocumentTitle("Configuración");
   const toast = useToast();
-  const s = useQuery(() => api.get<{ campaign: Record<string, unknown>; store: Record<string, unknown>; crypto: { copPerUnit: number | null }; paymentMethods: PaymentMethodInfo[] }>("/api/admin/settings"));
+  const s = useQuery(() =>
+    api.get<{
+      campaign: Record<string, unknown>;
+      store: Record<string, unknown>;
+      crypto: { copPerUnit: number | null };
+      paymentMethods: PaymentMethodInfo[];
+      manualAccounts: { id: string; kind: string; label: string; holder: string; number: string; qrImage: string; instructions: string; enabled: boolean }[];
+      paymentDisplay: Record<string, { logo: string; label: string }>;
+    }>("/api/admin/settings"),
+  );
   const [rate, setRate] = useState("");
   const zenoCurrency = s.data?.paymentMethods.find((m) => m.id === "zenobank")?.currency ?? "USD";
   const [savingRate, setSavingRate] = useState(false);
@@ -579,6 +630,8 @@ export function AdminSettings() {
     <>
       <div className="dash-head"><div><h1 className="dash-title">Configuración</h1><p className="eyebrow">Pagos, correo, tienda y campaña: todo se ajusta aquí.</p></div></div>
       <IntegrationsSettings methods={s.data.paymentMethods} onSaved={() => void s.reload()} />
+      <ManualAccountsSettings initial={s.data.manualAccounts ?? []} onSaved={() => void s.reload()} />
+      <PaymentDisplaySettings methods={s.data.paymentMethods} initial={s.data.paymentDisplay ?? {}} onSaved={() => void s.reload()} />
       <div className="panel">
         <div className="panel-head"><h3>Criptomonedas (Zenobank)</h3></div>
         <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>

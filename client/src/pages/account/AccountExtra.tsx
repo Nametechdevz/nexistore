@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Icon } from "../../components/Icon";
+import { ManualAccounts, ProofForm } from "../../components/ManualPay";
+import { PayLogo } from "../../components/PayLogo";
 import { Alert, Empty, ErrorState, Modal, SelectField, Skeleton, Spinner, SubmitButton, TextArea, TextField } from "../../components/ui";
 import { api, ApiError } from "../../lib/api";
 import { formatCOP, formatDate, formatDateTime, PROVIDER_LABEL } from "../../lib/format";
@@ -14,12 +16,24 @@ import { ISSUE_REASONS, ticketSchema, topupSchema } from "../../../../shared/sch
 interface WalletData {
   balance: number;
   transactions: { id: number; kind: keyof typeof WALLET_TX_LABEL; amount: number; balanceAfter: number; reference: string | null; note: string; createdAt: string }[];
-  topups: { code: string; amount: number; provider: string; status: string; paymentCurrency: string | null; paymentAmountForeign: string | null; createdAt: string }[];
+  topups: {
+    code: string;
+    amount: number;
+    provider: string;
+    status: string;
+    paymentCurrency: string | null;
+    paymentAmountForeign: string | null;
+    createdAt: string;
+    proofUrl: string | null;
+    proofReference: string | null;
+    manualAccount: string | null;
+    reviewNote: string | null;
+  }[];
 }
 
 const PRESETS = [20000, 50000, 100000, 200000];
 const TX_ICON = { topup: "plus", purchase: "bag", refund: "refresh", adjustment: "pencil" } as const;
-const TOPUP_STATUS: Record<string, string> = { pending: "Pendiente", paid: "Acreditada", cancelled: "Cancelada" };
+const TOPUP_STATUS: Record<string, string> = { pending: "Pendiente", paid: "Acreditada", cancelled: "Cancelada", rejected: "Rechazada" };
 
 export function WalletPage() {
   useDocumentTitle("Billetera");
@@ -27,7 +41,9 @@ export function WalletPage() {
   const store = useStore();
   const [params, setParams] = useSearchParams();
   const w = useQuery(() => api.get<WalletData>("/api/account/wallet"));
-  const methods = (store?.paymentMethods ?? []).filter((m) => (TOPUP_PROVIDERS as readonly string[]).includes(m.id));
+  // Solo se muestran los métodos activos.
+  const methods = (store?.paymentMethods ?? []).filter((m) => m.configured && (TOPUP_PROVIDERS as readonly string[]).includes(m.id));
+  const accounts = store?.manualAccounts ?? [];
   const firstReady = methods.find((m) => m.configured)?.id ?? "wompi";
   const form = useForm(topupSchema, { amount: 50000, provider: firstReady as "wompi" });
   const [instructions, setInstructions] = useState<{ code: string; text: string } | null>(null);
@@ -105,26 +121,50 @@ export function WalletPage() {
               error={form.errors.amount}
               hint={`Mínimo ${formatCOP(WALLET_MIN_TOPUP)}.`}
             />
+            {!methods.length && <Alert kind="warning">Las recargas no están disponibles por ahora. Escríbenos a soporte.</Alert>}
             <div className="pay-options" role="radiogroup" aria-label="Método de recarga">
               {methods.map((m) => (
-                <label key={m.id} className={`pay-option${m.configured ? "" : " is-disabled"}`} style={{ gridTemplateColumns: "auto minmax(0,1fr) auto" }}>
-                  <input type="radio" name="topup" disabled={!m.configured} checked={form.values.provider === m.id} onChange={() => form.set("provider", m.id as "wompi")} />
+                <label key={m.id} className="pay-option">
+                  <input type="radio" name="topup" checked={form.values.provider === m.id} onChange={() => form.set("provider", m.id as "wompi")} />
+                  <PayLogo id={m.id} logo={m.logo} label={m.label} />
                   <span>
                     <strong style={{ display: "block" }}>{m.label}</strong>
-                    <span className="faint" style={{ fontSize: 13 }}>{m.configured ? m.description : m.pendingReason}</span>
+                    <span className="faint" style={{ fontSize: 13 }}>{m.description}</span>
                   </span>
-                  {!m.configured && <span className="status status-neutral">Pendiente</span>}
                 </label>
               ))}
             </div>
             {form.errors.provider && <p className="field-error">{form.errors.provider}</p>}
             {foreign && <Alert kind="info">Pagarás el equivalente a <strong className="num">{foreign} {selected!.currency}</strong> en cripto (tasa {formatCOP(selected!.rate!)} por {selected!.currency}).</Alert>}
-            <div>
-              <SubmitButton loading={form.submitting} disabled={!methods.some((m) => m.configured)}>
-                <Icon name="wallet" /> Recargar {formatCOP(Number(form.values.amount) || 0)}
-              </SubmitButton>
-            </div>
+            {!(selected?.id === "manual" && accounts.length) && (
+              <div>
+                <SubmitButton loading={form.submitting} disabled={!methods.length}>
+                  <Icon name="wallet" /> Recargar {formatCOP(Number(form.values.amount) || 0)}
+                </SubmitButton>
+              </div>
+            )}
           </form>
+          {selected?.id === "manual" && accounts.length > 0 && (
+            <div className="mp-wrap" style={{ marginTop: 20 }}>
+              <ManualAccounts accounts={accounts} amount={Number(form.values.amount) || 0} />
+              <h3 className="mp-title">Envía tu comprobante</h3>
+              <ProofForm
+                accounts={accounts}
+                submitLabel={`Enviar recarga de ${formatCOP(Number(form.values.amount) || 0)}`}
+                extraValid={Number(form.values.amount) >= WALLET_MIN_TOPUP}
+                onSubmit={async (d) => {
+                  const amount = Number(form.values.amount) || 0;
+                  if (amount < WALLET_MIN_TOPUP) {
+                    form.setErrors({ amount: `La recarga mínima es ${formatCOP(WALLET_MIN_TOPUP)}.` });
+                    return;
+                  }
+                  await api.post("/api/account/wallet/topups", { amount, provider: "manual", ...d });
+                  toast("success", "Recarga enviada. Te avisaremos cuando la revisemos.");
+                  await w.reload();
+                }}
+              />
+            </div>
+          )}
         </div>
         <div className="panel">
           <div className="panel-head"><h3>Recargas recientes</h3></div>
@@ -136,8 +176,12 @@ export function WalletPage() {
                     <strong className="num">{formatCOP(t.amount)}</strong> · {PROVIDER_LABEL[t.provider] ?? t.provider}
                     {t.paymentAmountForeign && <span className="faint"> ({t.paymentAmountForeign} {t.paymentCurrency})</span>}
                     <span className="faint" style={{ display: "block", fontSize: 12 }}>{t.code} · {formatDateTime(t.createdAt)}</span>
+                    {t.proofReference && <span className="faint" style={{ display: "block", fontSize: 12 }}>{t.manualAccount} · ref. {t.proofReference}</span>}
+                    {t.status === "rejected" && t.reviewNote && <span style={{ display: "block", fontSize: 12, color: "#ff6b6b" }}>Motivo: {t.reviewNote}</span>}
                   </span>
-                  <span className={`status ${t.status === "paid" ? "status-completed" : t.status === "pending" ? "status-pending_payment" : "status-neutral"}`}>{TOPUP_STATUS[t.status]}</span>
+                  <span className={`status ${t.status === "paid" ? "status-completed" : t.status === "pending" ? "status-pending_payment" : t.status === "rejected" ? "status-cancelled" : "status-neutral"}`}>
+                    {t.status === "pending" && t.proofUrl ? "En revisión" : TOPUP_STATUS[t.status]}
+                  </span>
                 </li>
               ))}
             </ul>

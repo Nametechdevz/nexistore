@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, setCsrfToken } from "./api";
 import { CART_MAX_QTY } from "../../../shared/constants";
 import type { CampaignSettings } from "../../../shared/schemas";
-import type { CartLine, PaymentMethodInfo, SessionUser } from "../../../shared/types";
+import type { ManualAccountPublic, CartLine, PaymentMethodInfo, SessionUser } from "../../../shared/types";
 
 /* ---------------- Toasts ---------------- */
 
@@ -41,6 +41,8 @@ export interface StoreInfo {
     legalCity?: string;
   };
   paymentMethods: PaymentMethodInfo[];
+  /** Cuentas activas para pagos por transferencia (Nequi, Bre-B, QR…). */
+  manualAccounts?: ManualAccountPublic[];
   unavailableMethods: { id: string; label: string; reason: string }[];
 }
 const StoreCtx = createContext<StoreInfo | null>(null);
@@ -53,9 +55,10 @@ interface CartState {
   count: number;
   coupon: string;
   setCoupon: (code: string) => void;
-  add: (productId: number, quantity?: number, max?: number) => void;
-  setQty: (productId: number, quantity: number) => void;
-  remove: (productId: number) => void;
+  /** variantId: opción elegida (productos con variaciones). */
+  add: (productId: number, quantity?: number, max?: number, variantId?: number | null) => void;
+  setQty: (productId: number, quantity: number, variantId?: number | null) => void;
+  remove: (productId: number, variantId?: number | null) => void;
   clear: () => void;
   syncFromServer: () => Promise<void>;
 }
@@ -85,7 +88,11 @@ const sanitize = (lines: unknown): CartLine[] =>
   Array.isArray(lines)
     ? lines
         .filter((l) => l && Number.isInteger(l.productId) && Number.isInteger(l.quantity) && l.quantity > 0)
-        .map((l) => ({ productId: l.productId, quantity: Math.min(l.quantity, CART_MAX_QTY) }))
+        .map((l) => ({
+          productId: l.productId,
+          quantity: Math.min(l.quantity, CART_MAX_QTY),
+          variantId: Number.isInteger(l.variantId) && l.variantId > 0 ? l.variantId : null,
+        }))
     : [];
 
 export function AppProviders({ children }: { children: ReactNode }) {
@@ -206,16 +213,21 @@ export function AppProviders({ children }: { children: ReactNode }) {
         setCouponState(code);
         writeLocal(COUPON_KEY, code);
       },
-      add: (productId, quantity = 1, max = CART_MAX_QTY) =>
+      add: (productId, quantity = 1, max = CART_MAX_QTY, variantId = null) =>
         update((prev) => {
-          const found = prev.find((l) => l.productId === productId);
+          const same = (l: CartLine) => l.productId === productId && (l.variantId ?? null) === (variantId ?? null);
+          const found = prev.find(same);
           const limit = Math.min(max, CART_MAX_QTY);
-          if (found) return prev.map((l) => (l.productId === productId ? { ...l, quantity: Math.min(l.quantity + quantity, limit) } : l));
-          return [...prev, { productId, quantity: Math.min(quantity, limit) }];
+          if (found) return prev.map((l) => (same(l) ? { ...l, quantity: Math.min(l.quantity + quantity, limit) } : l));
+          return [...prev, { productId, variantId: variantId ?? null, quantity: Math.min(quantity, limit) }];
         }),
-      setQty: (productId, quantity) =>
-        update((prev) => prev.map((l) => (l.productId === productId ? { ...l, quantity: Math.max(1, Math.min(quantity, CART_MAX_QTY)) } : l))),
-      remove: (productId) => update((prev) => prev.filter((l) => l.productId !== productId)),
+      setQty: (productId, quantity, variantId = null) =>
+        update((prev) =>
+          prev.map((l) =>
+            l.productId === productId && (l.variantId ?? null) === (variantId ?? null) ? { ...l, quantity: Math.max(1, Math.min(quantity, CART_MAX_QTY)) } : l,
+          ),
+        ),
+      remove: (productId, variantId = null) => update((prev) => prev.filter((l) => !(l.productId === productId && (l.variantId ?? null) === (variantId ?? null)))),
       clear: () => update(() => []),
       syncFromServer,
     }),

@@ -21,6 +21,21 @@ export async function seedCatalog(): Promise<void> {
       ],
     );
   }
+  // Producto de ejemplo con opciones (variaciones).
+  const fam = await queryOne<{ id: number }>("SELECT id FROM products WHERE slug = 'cineplus-familiar'");
+  if (fam) {
+    for (const [i, [name, price, compare, stock, days]] of ([
+      ["1 mes", 14900, 19900, 15, 30],
+      ["3 meses", 39900, 54900, 10, 90],
+      ["6 meses", 69900, 99900, 6, 180],
+    ] as const).entries()) {
+      await execute(
+        "INSERT INTO product_variants (product_id, name, price, compare_at_price, stock, duration_days, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [fam.id, name, price, compare, stock, days, i],
+      );
+    }
+    await execute("UPDATE products SET price = 14900, compare_at_price = 19900, stock = 31, summary = '4 pantallas · elige la duración' WHERE id = ?", [fam.id]);
+  }
   // Productos de ejemplo con entrega automática e inventario de cuentas FICTICIAS (solo si hay llave de cifrado).
   if (vaultConfigured()) {
     for (const [slug, days, n] of [["cineplus-premium-anual", 365, 8], ["sonora-premium-anual", 365, 6], ["lumen-ai-pro", 30, 4]] as const) {

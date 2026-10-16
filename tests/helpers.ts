@@ -16,6 +16,10 @@ export async function resetDb() {
   await execute("SET FOREIGN_KEY_CHECKS = 1");
   await migrate(undefined, () => undefined);
   await seedCatalog();
+  // Cuenta de transferencia para las pruebas que pagan por transferencia.
+  await execute("INSERT INTO settings (name, value) VALUES ('manualAccounts', ?)", [
+    JSON.stringify({ accounts: [{ id: "pruebas01", kind: "nequi", label: "Nequi pruebas", holder: "", number: "3000000000", qrImage: "", instructions: "", enabled: true }] }),
+  ]);
 }
 
 export { closePool };

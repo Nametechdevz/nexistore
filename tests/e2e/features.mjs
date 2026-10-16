@@ -5,6 +5,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
+import { configureTransfers, sendProof } from "./common.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@nexistore.local";
@@ -35,6 +36,14 @@ async function login(page, email, password, next) {
   await page.waitForURL((u) => u.pathname === next.split("?")[0]);
 }
 
+/* ---------- Admin: deja lista la cuenta de transferencias ---------- */
+const actx = await browser.newContext(desktop);
+const a = await actx.newPage();
+watch(a, "admin");
+await login(a, ADMIN_EMAIL, ADMIN_PASSWORD, "/admin");
+await configureTransfers(a, BASE);
+await shot(a, "08f-admin-cuentas-transferencia", true);
+
 /* ---------- Cliente: registro y recarga ---------- */
 const cctx = await browser.newContext(desktop);
 const c = await cctx.newPage();
@@ -50,24 +59,23 @@ await c.getByRole("button", { name: "Crear cuenta" }).click();
 await c.waitForURL(/cuenta\/billetera/);
 await c.getByRole("button", { name: "$100.000" }).click();
 await c.locator("label.pay-option", { hasText: "Transferencia" }).click();
-await shot(c, "09-billetera-recarga");
-await c.getByRole("button", { name: /Recargar \$100\.000/ }).click();
-await c.getByRole("heading", { name: "Recarga por transferencia" }).waitFor();
-await shot(c, "09b-billetera-instrucciones");
-await c.getByRole("button", { name: "Entendido" }).click();
-step("Cliente solicita recarga por transferencia (queda pendiente)");
+await c.locator(".mp-account").first().waitFor();
+await shot(c, "09-billetera-recarga", true);
+await sendProof(c, "M11223344", /Enviar recarga de \$100\.000/);
+await c.getByText("Recarga enviada").waitFor();
+await c.locator(".ledger-row", { hasText: "En revisión" }).first().waitFor();
+await shot(c, "09b-billetera-en-revision");
+step("Cliente envía una recarga por Nequi con comprobante y referencia (queda en revisión)");
 
-/* ---------- Admin: confirma la recarga ---------- */
-const actx = await browser.newContext(desktop);
-const a = await actx.newPage();
-watch(a, "admin");
-await login(a, ADMIN_EMAIL, ADMIN_PASSWORD, "/admin");
+/* ---------- Admin: revisa el comprobante y acredita ---------- */
 await a.goto(`${BASE}/admin/billetera`);
-await a.locator("tr", { hasText: email }).getByRole("button", { name: "Confirmar" }).click();
+const trow = a.locator("tr", { hasText: email });
+await trow.locator(".proof-mini img").waitFor();
+await shot(a, "10-admin-billetera");
+await trow.getByRole("button", { name: "Acreditar", exact: true }).click();
 await a.getByRole("button", { name: "Acreditar saldo" }).click();
 await a.getByText("Saldo acreditado.").waitFor();
-await shot(a, "10-admin-billetera");
-step("Admin confirma la transferencia y acredita el saldo");
+step("Admin ve el comprobante y acredita el saldo");
 
 await c.reload();
 await c.getByText("$100.000").first().waitFor();
@@ -75,6 +83,23 @@ await c.getByText("$100.000").first().waitFor();
 await c.locator(".ledger-row", { hasText: "Recarga" }).first().waitFor();
 await shot(c, "09c-billetera-saldo", true);
 step("El cliente ve el saldo y el movimiento");
+
+/* ---------- Recarga rechazada ---------- */
+await c.goto(`${BASE}/cuenta/billetera`);
+await c.getByRole("button", { name: "$20.000" }).click();
+await c.locator("label.pay-option", { hasText: "Transferencia" }).click();
+await sendProof(c, "M00000001", /Enviar recarga de \$20\.000/);
+await c.getByText("Recarga enviada").waitFor();
+await a.goto(`${BASE}/admin/billetera`);
+await a.locator("tr", { hasText: email }).first().getByRole("button", { name: "Rechazar" }).click();
+await a.getByRole("button", { name: "El valor no coincide" }).click();
+await a.getByRole("button", { name: "Rechazar y avisar" }).click();
+await a.getByText("Recarga rechazada").waitFor();
+await c.reload();
+await c.locator(".ledger-row", { hasText: "Rechazada" }).first().waitFor();
+await c.locator(".ledger-row", { hasText: "Motivo: El valor no coincide" }).first().waitFor();
+await shot(c, "09d-billetera-rechazada");
+step("Admin rechaza otra recarga con motivo y el cliente lo ve");
 
 /* ---------- Admin: recarga manual a un cliente ---------- */
 await a.goto(`${BASE}/admin/billetera`);
@@ -87,6 +112,29 @@ await a.getByRole("button", { name: /Acreditar \$50\.000/ }).click();
 await a.locator(".modal").getByRole("button", { name: "Acreditar saldo" }).click();
 await a.getByText(/acreditada\. Nuevo saldo: \$150\.000/).waitFor();
 step("Admin hace una recarga manual (Nequi + comprobante) desde el panel");
+
+/* ---------- Producto con opciones ---------- */
+await c.goto(`${BASE}/productos`);
+await c.locator(".pcard", { hasText: "CinePlus Familiar" }).getByText("Desde").waitFor();
+await c.goto(`${BASE}/producto/cineplus-familiar`);
+await c.getByRole("radio", { name: /3 meses/ }).click();
+await c.locator(".price", { hasText: "$39.900" }).first().waitFor();
+await shot(c, "11a-producto-opciones");
+await c.getByRole("button", { name: "Agregar al carrito" }).click();
+await c.goto(`${BASE}/carrito`);
+await c.locator(".variant-tag", { hasText: "3 meses" }).waitFor();
+await c.goto(`${BASE}/checkout`);
+await c.getByLabel("Celular").fill("3001234567");
+await c.getByRole("button", { name: /Continuar/ }).click();
+await c.locator("label.pay-option", { hasText: "Billetera NexiStore" }).click();
+await c.locator("form label.check input").check();
+await c.getByRole("button", { name: /Pagar \$39\.900/ }).click();
+await c.waitForURL(/\/pedido\/NS-.+\/confirmacion/);
+await c.getByRole("heading", { name: "¡Pago confirmado!" }).waitFor();
+const variantOrder = c.url().match(/pedido\/(NS-[^/]+)/)[1];
+await c.goto(`${BASE}/cuenta/pedidos/${variantOrder}`);
+await c.locator(".variant-tag", { hasText: "3 meses" }).waitFor();
+step(`Compra de una opción («3 meses») con billetera: pedido ${variantOrder}`);
 
 /* ---------- Compra con billetera de producto automático ---------- */
 await c.goto(`${BASE}/producto/cineplus-premium-anual`);

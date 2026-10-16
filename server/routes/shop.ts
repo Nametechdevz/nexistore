@@ -7,7 +7,11 @@ import { requireAuth } from "../middleware/session.js";
 import { adapters, foreignQuoteFor, isProviderReady } from "../payments/index.js";
 import { applyVerifiedPayment, changeStatus, createOrder, getOrder, listOrders, quoteCart } from "../services/orders.js";
 import { ORDER_FILTERS, type OrderFilter } from "../../shared/constants.js";
-import { cartLineSchema, cartSyncSchema, checkoutSchema, couponCodeSchema, reportIssueSchema, reviewSchema } from "../../shared/schemas.js";
+import { cartLineSchema, cartSyncSchema, checkoutSchema, couponCodeSchema, paymentProofSchema, reportIssueSchema, reviewSchema } from "../../shared/schemas.js";
+import { formatCOP } from "../../shared/pricing.js";
+import { ownedProofId } from "../services/media.js";
+import { accountSnapshot, findManualAccount } from "../services/manual-pay.js";
+import { notify } from "../services/notifications.js";
 import { reportIssue } from "../services/support.js";
 
 export const shopRouter = Router();
@@ -15,10 +19,11 @@ export const shopRouter = Router();
 /* ---------- Carrito ---------- */
 
 async function readCart(userId: number) {
-  return query<{ productId: number; quantity: number }>(
-    "SELECT product_id AS productId, quantity FROM cart_items WHERE user_id = ? ORDER BY updated_at",
+  const rows = await query<{ productId: number; variantId: number; quantity: number }>(
+    "SELECT product_id AS productId, variant_id AS variantId, quantity FROM cart_items WHERE user_id = ? ORDER BY updated_at",
     [userId],
   );
+  return rows.map((r) => ({ productId: r.productId, quantity: r.quantity, variantId: r.variantId || null }));
 }
 
 shopRouter.get(
@@ -40,14 +45,52 @@ shopRouter.put(
       if (mode === "replace") await conn.execute("DELETE FROM cart_items WHERE user_id = ?", [userId]);
       for (const it of items) {
         await conn.execute(
-          `INSERT INTO cart_items (user_id, product_id, quantity)
-           SELECT ?, id, LEAST(?, max_per_order) FROM products WHERE id = ? AND is_active = 1
+          `INSERT INTO cart_items (user_id, product_id, variant_id, quantity)
+           SELECT ?, p.id, ?, LEAST(?, p.max_per_order) FROM products p WHERE p.id = ? AND p.is_active = 1
+              AND (? = 0 OR EXISTS (SELECT 1 FROM product_variants v WHERE v.id = ? AND v.product_id = p.id AND v.is_active = 1))
            ON DUPLICATE KEY UPDATE quantity = LEAST(${mode === "merge" ? "quantity + VALUES(quantity)" : "VALUES(quantity)"}, 10)`,
-          [userId, it.quantity, it.productId],
+          [userId, it.variantId ?? 0, it.quantity, it.productId, it.variantId ?? 0, it.variantId ?? 0],
         );
       }
     });
     res.json({ items: await readCart(userId) });
+  }),
+);
+
+/** El cliente envía el comprobante de su pago por transferencia; un administrador lo revisa. */
+shopRouter.post(
+  "/orders/:code/proof",
+  requireAuth,
+  ah(async (req, res) => {
+    const d = parse(paymentProofSchema, req.body);
+    const code = String(req.params.code);
+    const o = await queryOne<{ id: number; status: string; payment_provider: string; total: number }>(
+      "SELECT id, status, payment_provider, total FROM orders WHERE code = ? AND user_id = ?",
+      [code, req.user!.id],
+    );
+    if (!o) throw notFound("Pedido no encontrado.");
+    if (o.payment_provider !== "manual" || o.status !== "pending_payment") throw conflict("Este pedido no espera un comprobante de transferencia.");
+    const account = await findManualAccount(d.accountId);
+    if (!account) throw badRequest("Elige una de las cuentas disponibles.", { accountId: "Cuenta no disponible." });
+    const mediaId = await ownedProofId(d.proofUrl, req.user!.id);
+    if (!mediaId) throw badRequest("Sube de nuevo la imagen del comprobante.", { proofUrl: "Comprobante no válido." });
+    await execute(
+      "UPDATE orders SET proof_media_id = ?, proof_reference = ?, manual_account = ?, proof_submitted_at = UTC_TIMESTAMP() WHERE id = ?",
+      [mediaId, d.reference, accountSnapshot(account), o.id],
+    );
+    await execute("INSERT INTO order_events (order_id, status, note, actor) VALUES (?, 'pending_payment', ?, 'customer')", [
+      o.id,
+      `Comprobante enviado (${accountSnapshot(account)} · ref. ${d.reference}). En revisión.`,
+    ]);
+    await notify({
+      audience: "admin",
+      kind: "payment_proof",
+      title: `Comprobante por revisar: pedido ${code}`,
+      body: `${req.user!.name} · ${formatCOP(Number(o.total))} · ${account.label} · ref. ${d.reference}`,
+      link: `/admin/pedidos/${code}`,
+      email: true,
+    });
+    res.json({ order: await getOrder(code, req.user!.id) });
   }),
 );
 
@@ -59,8 +102,9 @@ shopRouter.post(
     const { items, couponCode } = parse(quoteSchema, req.body);
     const q = await quoteCart(items, couponCode || undefined);
     res.json({
-      items: q.items.map((i) => ({ product: i.product, quantity: i.quantity, available: i.available, lineTotal: i.lineTotal })),
+      items: q.items.map((i) => ({ product: i.product, variant: i.variant, quantity: i.quantity, available: i.available, lineTotal: i.lineTotal })),
       removed: q.removed,
+      removedLines: q.removedLines,
       coupon: q.coupon,
       couponError: q.couponError,
       subtotal: q.subtotal,

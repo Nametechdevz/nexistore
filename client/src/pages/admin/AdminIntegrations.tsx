@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "../../components/Icon";
-import { Alert, Check, Skeleton, Spinner, TextField } from "../../components/ui";
+import { Alert, Check, SelectField, Skeleton, Spinner, TextField } from "../../components/ui";
+import { ImageUploader } from "../../components/ImageUploader";
+import { MANUAL_ACCOUNT_KINDS } from "../../../../shared/schemas";
 import { api, ApiError } from "../../lib/api";
 import { useQuery } from "../../lib/hooks";
 import { useToast } from "../../lib/state";
@@ -170,7 +172,7 @@ export function IntegrationsSettings({ methods, onSaved }: { methods: PaymentMet
         <Check checked={Boolean(draft.manualEnabled)} onChange={(v) => setDraft({ ...draft, manualEnabled: v })}>
           Aceptar pagos por transferencia (los confirmas tú desde Pedidos o Billetera)
         </Check>
-        <p className="hint">Las instrucciones para el cliente (números de cuenta) se editan en «Datos de la tienda», más abajo.</p>
+        <p className="hint">Las cuentas (Nequi, Bre-B, QR…) se configuran en «Cuentas para transferencias», justo debajo. El cliente envía comprobante y tú lo apruebas o rechazas.</p>
       </Section>
 
       <Section title="Correo (SMTP)" status={{ ok: Boolean(view.values.smtpHost && view.values.smtpUser && view.values.smtpPasswordSet), text: view.values.smtpHost && view.values.smtpPasswordSet ? "Configurado" : "Pendiente" }}>
@@ -222,6 +224,134 @@ export function IntegrationsSettings({ methods, onSaved }: { methods: PaymentMet
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn btn-primary" onClick={save} disabled={busy}>{busy && <Spinner />} Guardar cambios</button>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Cuentas para transferencias ================= */
+
+const KIND_OPTIONS = Object.entries(MANUAL_ACCOUNT_KINDS).map(([value, label]) => ({ value, label }));
+const NUMBER_LABEL: Record<string, string> = { nequi: "Número Nequi", daviplata: "Número Daviplata", breb: "Llave Bre-B", bancolombia: "Número de cuenta", qr: "Número o llave (opcional)", otro: "Número o cuenta" };
+
+type AccountForm = { id?: string; kind: string; label: string; holder: string; number: string; qrImage: string; instructions: string; enabled: boolean };
+
+/** Cuentas donde los clientes transfieren (pedidos y recargas). Cada pago se envía con comprobante y lo revisas tú. */
+export function ManualAccountsSettings({ initial, onSaved }: { initial: AccountForm[]; onSaved: () => void }) {
+  const toast = useToast();
+  const [list, setList] = useState<AccountForm[]>(initial);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const set = (i: number, patch: Partial<AccountForm>) => setList(list.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  const err = (i: number, k: string) => errors[`accounts.${i}.${k}`];
+
+  const save = async () => {
+    setBusy(true);
+    setErrors({});
+    try {
+      const r = await api.put<{ accounts: AccountForm[] }>("/api/admin/settings/manual-accounts", { accounts: list });
+      setList(r.accounts);
+      toast("success", "Cuentas guardadas. Ya aparecen en el checkout y en la billetera.");
+      onSaved();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErrors(e.fields);
+        toast("error", e.message);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h3>Cuentas para transferencias</h3>
+        <button className="btn btn-primary btn-sm" onClick={save} disabled={busy}>{busy && <Spinner />} Guardar cuentas</button>
+      </div>
+      <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
+        Nequi, Daviplata, llave Bre-B, cuenta bancaria o código QR. El cliente transfiere, sube la imagen del comprobante con la referencia y tú lo acreditas o rechazas en
+        <strong> Billetera</strong> (recargas) o en el <strong>pedido</strong>. Activa «Transferencias» en «Pagos, correo y acceso» para mostrarlas.
+      </p>
+      <div style={{ display: "grid", gap: 12 }}>
+        {list.map((a, i) => (
+          <div key={a.id ?? `n${i}`} className="acct-row">
+            <div className="form-row">
+              <SelectField label="Tipo" value={a.kind} onValue={(v) => set(i, { kind: v, label: a.label || MANUAL_ACCOUNT_KINDS[v as keyof typeof MANUAL_ACCOUNT_KINDS] })} options={KIND_OPTIONS} />
+              <TextField label="Nombre visible" value={a.label} error={err(i, "label")} onValue={(v) => set(i, { label: v })} placeholder="Ej.: Nequi principal" maxLength={60} />
+              <TextField label="Titular (opcional)" value={a.holder} onValue={(v) => set(i, { holder: v })} placeholder="Nombre o empresa" maxLength={80} />
+            </div>
+            <div className="form-row">
+              <TextField label={NUMBER_LABEL[a.kind] ?? "Número"} value={a.number} error={err(i, "number")} onValue={(v) => set(i, { number: v })} maxLength={80} placeholder={a.kind === "breb" ? "@mitienda o celular" : ""} />
+              <TextField label="Instrucciones (opcional)" value={a.instructions} onValue={(v) => set(i, { instructions: v })} maxLength={400} placeholder="Ej.: Envía el valor exacto" />
+            </div>
+            <div className="acct-foot">
+              <div style={{ maxWidth: 200 }}>
+                <ImageUploader label="Imagen QR (opcional)" max={1} maxSide={1000} value={a.qrImage ? [a.qrImage] : []} onChange={(u) => set(i, { qrImage: u[0] ?? "" })} />
+              </div>
+              <div style={{ display: "grid", gap: 10, alignContent: "end" }}>
+                <Check checked={a.enabled} onChange={(v) => set(i, { enabled: v })}>Visible para los clientes</Check>
+                <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="trash" /> Quitar cuenta</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="btn btn-outline btn-sm"
+        style={{ marginTop: 12 }}
+        disabled={list.length >= 12}
+        onClick={() => setList([...list, { kind: "nequi", label: "Nequi", holder: "", number: "", qrImage: "", instructions: "", enabled: true }])}
+      >
+        <Icon name="plus" /> Agregar cuenta
+      </button>
+    </div>
+  );
+}
+
+/* ================= Logos de los métodos de pago ================= */
+
+type DisplayForm = Record<string, { logo: string; label: string }>;
+const DISPLAY_IDS = ["wallet", "wompi", "mercadopago", "zenobank", "manual"] as const;
+
+export function PaymentDisplaySettings({ methods, initial, onSaved }: { methods: PaymentMethodInfo[]; initial: DisplayForm; onSaved: () => void }) {
+  const toast = useToast();
+  const [form, setForm] = useState<DisplayForm>(() => Object.fromEntries(DISPLAY_IDS.map((id) => [id, { logo: initial[id]?.logo ?? "", label: initial[id]?.label ?? "" }])));
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h3>Logos de los métodos de pago</h3>
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={async () => {
+          setBusy(true);
+          try {
+            await api.put("/api/admin/settings/payment-display", form);
+            toast("success", "Logos guardados.");
+            onSaved();
+          } catch (e) {
+            toast("error", e instanceof ApiError ? e.message : "Error");
+          } finally {
+            setBusy(false);
+          }
+        }}>{busy && <Spinner />} Guardar logos</button>
+      </div>
+      <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>Sube el logo o ícono de cada método (cuadrado, fondo blanco o transparente). En la tienda solo aparecen los métodos <strong>activos</strong>.</p>
+      <div className="logo-grid">
+        {DISPLAY_IDS.map((id) => {
+          const m = methods.find((x) => x.id === id);
+          if (!m) return null;
+          return (
+            <div key={id} className="logo-card">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <strong style={{ fontSize: 14 }}>{m.label}</strong>
+                <span className={`status ${m.configured ? "status-completed" : "status-neutral"}`}>{m.configured ? "Activo" : "Oculto"}</span>
+              </div>
+              <ImageUploader label="Logo" max={1} maxSide={400} value={form[id]!.logo ? [form[id]!.logo] : []} onChange={(u) => setForm({ ...form, [id]: { ...form[id]!, logo: u[0] ?? "" } })} />
+              <TextField label="Nombre visible (opcional)" value={form[id]!.label} onValue={(v) => setForm({ ...form, [id]: { ...form[id]!, label: v } })} maxLength={60} placeholder="Por defecto" />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

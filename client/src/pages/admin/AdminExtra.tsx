@@ -25,6 +25,7 @@ interface InvSummary {
   fallen: number;
   expired: number;
   expiring: number;
+  variants: { id: number; name: string; available: number }[];
 }
 
 interface InvItem {
@@ -33,6 +34,7 @@ interface InvItem {
   status: InventoryStatus;
   productId: number;
   productName: string;
+  variantName: string | null;
   expiresAt: string | null;
   soldAt: string | null;
   serviceEndsAt: string | null;
@@ -135,6 +137,13 @@ export function AdminInventory() {
               <div><strong style={{ color: p.expiring ? "var(--warning)" : undefined }}>{p.expiring}</strong><span>Por vencer</span></div>
               <div><strong style={{ color: p.fallen ? "#ff6b6b" : undefined }}>{p.fallen}</strong><span>Caídas</span></div>
             </div>
+            {p.variants.length > 0 && (
+              <div className="inv-variants">
+                {p.variants.map((v) => (
+                  <span key={v.id} className={v.available <= 0 ? "is-out" : ""}>{v.name}: <strong className="num">{v.available}</strong></span>
+                ))}
+              </div>
+            )}
           </button>
         ))}
       </div>
@@ -161,7 +170,7 @@ export function AdminInventory() {
               <tbody>
                 {list.data.items.map((it) => (
                   <tr key={it.id}>
-                    <td><strong>{it.label || `#${it.id}`}</strong><div className="faint" style={{ fontSize: 12 }}>{it.productName}</div></td>
+                    <td><strong>{it.label || `#${it.id}`}</strong><div className="faint" style={{ fontSize: 12 }}>{it.productName}{it.variantName ? ` · ${it.variantName}` : ""}</div></td>
                     <td><span className={`status status-${it.status}`}>{INVENTORY_STATUS_LABEL[it.status]}</span></td>
                     <td data-label="Vence:"><Expiry iso={it.expiresAt} /></td>
                     <td>{it.customer ? <><span>{it.customer.name}</span><div className="faint" style={{ fontSize: 12 }}>{it.orderCode && <Link className="text-accent" to={`/admin/pedidos/${it.orderCode}`}>{it.orderCode}</Link>}</div></> : <span className="faint">—</span>}</td>
@@ -205,6 +214,8 @@ export function AdminInventory() {
 function BulkModal({ products, defaultProduct, onClose, onDone }: { products: InvSummary[]; defaultProduct?: number; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [productId, setProductId] = useState(defaultProduct ?? 0);
+  const [variantId, setVariantId] = useState(0);
+  const variants = products.find((p) => p.productId === productId)?.variants ?? [];
   const [lines, setLines] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -216,7 +227,7 @@ function BulkModal({ products, defaultProduct, onClose, onDone }: { products: In
         setBusy(true);
         setError(null);
         try {
-          const r = await api.post<{ created: number }>("/api/admin/inventory/bulk", { productId, lines, expiresAt: expiresAt || null });
+          const r = await api.post<{ created: number }>("/api/admin/inventory/bulk", { productId, variantId: variantId || null, lines, expiresAt: expiresAt || null });
           toast("success", `${r.created} cuenta(s) agregada(s). El stock se actualizó.`);
           onDone();
         } catch (e) {
@@ -228,7 +239,16 @@ function BulkModal({ products, defaultProduct, onClose, onDone }: { products: In
       <div className="form">
         {error && <Alert kind="error">{error}</Alert>}
         <div className="form-row">
-          <SelectField label="Producto" value={productId} onValue={(v) => setProductId(Number(v))} options={products.map((p) => ({ value: p.productId, label: p.name }))} />
+          <SelectField label="Producto" value={productId} onValue={(v) => { setProductId(Number(v)); setVariantId(0); }} options={products.map((p) => ({ value: p.productId, label: p.name }))} />
+          {variants.length > 0 && (
+            <SelectField
+              label="Opción"
+              value={variantId}
+              onValue={(v) => setVariantId(Number(v))}
+              options={[{ value: 0, label: "Compartidas (sirven para todas las opciones)" }, ...variants.map((v) => ({ value: v.id, label: `Solo ${v.name}` }))]}
+              hint="Las compartidas se entregan en cualquier opción; las de una opción solo en esa."
+            />
+          )}
           <TextField label="Vencimiento por defecto (opcional)" type="date" value={expiresAt} onValue={setExpiresAt} hint="Fecha en que vence la cuenta en el proveedor." />
         </div>
         <TextArea
@@ -448,7 +468,47 @@ export function ManualTopupForm({ fixedCustomer, onDone }: { fixedCustomer?: { i
   );
 }
 
-interface Topup { code: string; amount: number; provider: string; status: string; paymentRef: string | null; paymentCurrency: string | null; paymentAmountForeign: string | null; createdAt: string; customer?: { id: number; name: string; email: string } }
+interface Topup {
+  code: string;
+  amount: number;
+  provider: string;
+  status: string;
+  paymentRef: string | null;
+  paymentCurrency: string | null;
+  paymentAmountForeign: string | null;
+  createdAt: string;
+  proofUrl: string | null;
+  proofReference: string | null;
+  manualAccount: string | null;
+  reviewNote: string | null;
+  duplicateRef: boolean;
+  customer?: { id: number; name: string; email: string };
+}
+
+const TOPUP_STATUS_ADMIN: Record<string, [string, string]> = {
+  pending: ["Pendiente", "status-pending_payment"],
+  paid: ["Acreditada", "status-completed"],
+  cancelled: ["Cancelada", "status-neutral"],
+  rejected: ["Rechazada", "status-cancelled"],
+};
+
+/** Rechazo de un comprobante con motivo (le llega al cliente). */
+export function RejectProofModal({ title, onClose, onReject }: { title: string; onClose: () => void; onReject: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const QUICK = ["El comprobante no corresponde a la cuenta", "El valor no coincide", "No recibimos la transferencia", "La imagen no se ve clara"];
+  return (
+    <Modal open title={title} onClose={onClose}
+      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button><button className="btn btn-danger" disabled={busy || reason.trim().length < 4} onClick={async () => { setBusy(true); try { await onReject(reason.trim()); } finally { setBusy(false); } }}>{busy && <Spinner />} Rechazar y avisar</button></>}>
+      <div className="form">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {QUICK.map((q) => <button key={q} type="button" className="btn btn-soft btn-sm" onClick={() => setReason(q)}>{q}</button>)}
+        </div>
+        <TextArea label="Motivo (lo verá el cliente)" value={reason} onValue={setReason} rows={3} maxLength={255} />
+      </div>
+    </Modal>
+  );
+}
 
 export function AdminWallet() {
   useDocumentTitle("Billetera");
@@ -456,6 +516,7 @@ export function AdminWallet() {
   const [status, setStatus] = useState("pending");
   const list = useQuery(() => api.get<{ items: Topup[]; totalBalances: number; usersWithBalance: number }>(`/api/admin/wallet/topups${qs({ status })}`), [status]);
   const [confirming, setConfirming] = useState<Topup | null>(null);
+  const [rejecting, setRejecting] = useState<Topup | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <>
@@ -469,7 +530,7 @@ export function AdminWallet() {
         <ManualTopupForm onDone={() => void list.reload()} />
       </div>
       <div className="tabs" style={{ marginBottom: 16 }}>
-        {[["pending", "Pendientes"], ["paid", "Acreditadas"], ["cancelled", "Canceladas"], ["", "Todas"]].map(([id, label]) => (
+        {[["pending", "Por revisar"], ["paid", "Acreditadas"], ["rejected", "Rechazadas"], ["cancelled", "Canceladas"], ["", "Todas"]].map(([id, label]) => (
           <button key={id} className="tab" aria-selected={status === id} onClick={() => setStatus(id!)}>{label}</button>
         ))}
       </div>
@@ -477,14 +538,23 @@ export function AdminWallet() {
         {list.error ? <ErrorState message={list.error.message} onRetry={list.reload} /> : list.loading && !list.data ? <Skeleton h={200} /> : !list.data?.items.length ? <Empty icon="wallet" title="Sin recargas en esta sección" /> : (
           <div className="table-wrap">
             <table className="table responsive">
-              <thead><tr><th>Recarga</th><th>Cliente</th><th>Método</th><th className="t-right">Monto</th><th>Estado</th><th /></tr></thead>
+              <thead><tr><th>Recarga</th><th>Cliente</th><th>Método / comprobante</th><th className="t-right">Monto</th><th>Estado</th><th /></tr></thead>
               <tbody>
                 {list.data.items.map((t) => (
                   <tr key={t.code}>
                     <td><strong className="num">{t.code}</strong><div className="faint" style={{ fontSize: 12 }}>{formatDateTime(t.createdAt)}</div></td>
                     <td>{t.customer?.name}<div className="faint" style={{ fontSize: 12 }}>{t.customer?.email}</div></td>
                     <td className="muted">
+                      {t.proofUrl && (
+                        <a href={t.proofUrl} target="_blank" rel="noreferrer" className="proof-mini" title="Ver comprobante completo">
+                          <img src={t.proofUrl} alt={`Comprobante ${t.code}`} loading="lazy" />
+                        </a>
+                      )}
                       {PROVIDER_LABEL[t.provider] ?? t.provider}
+                      {t.manualAccount && <div className="faint" style={{ fontSize: 12 }}>{t.manualAccount}</div>}
+                      {t.proofReference && <div style={{ fontSize: 12 }}>Ref. <strong className="num">{t.proofReference}</strong></div>}
+                      {t.duplicateRef && <div className="chip-warn" style={{ marginTop: 4 }}>Referencia repetida en otra recarga</div>}
+                      {t.status === "rejected" && t.reviewNote && <div style={{ fontSize: 12, color: "#ff6b6b" }}>Motivo: {t.reviewNote}</div>}
                       {t.provider === "manual" && t.paymentRef?.includes(":") && (() => {
                         const [m, ref] = t.paymentRef!.split(/:(.*)/s);
                         return (
@@ -496,12 +566,12 @@ export function AdminWallet() {
                       })()}
                     </td>
                     <td className="t-right num t-strong">{formatCOP(t.amount)}{t.paymentAmountForeign && <div className="faint" style={{ fontSize: 12 }}>{t.paymentAmountForeign} {t.paymentCurrency}</div>}</td>
-                    <td><span className={`status ${t.status === "paid" ? "status-completed" : t.status === "pending" ? "status-pending_payment" : "status-neutral"}`}>{t.status === "paid" ? "Acreditada" : t.status === "pending" ? "Pendiente" : "Cancelada"}</span></td>
+                    <td><span className={`status ${TOPUP_STATUS_ADMIN[t.status]?.[1] ?? "status-neutral"}`}>{TOPUP_STATUS_ADMIN[t.status]?.[0] ?? t.status}</span></td>
                     <td className="t-right">
                       {t.status === "pending" && t.provider === "manual" && (
                         <div className="row-actions">
-                          <button className="btn btn-soft btn-sm" onClick={() => setConfirming(t)}>Confirmar</button>
-                          <button className="btn btn-ghost btn-sm" onClick={async () => { await api.post(`/api/admin/wallet/topups/${t.code}/cancel`).catch(() => undefined); void list.reload(); }}>Cancelar</button>
+                          <button className="btn btn-primary btn-sm" onClick={() => setConfirming(t)}><Icon name="check" /> Acreditar</button>
+                          <button className="btn btn-outline btn-sm" onClick={() => setRejecting(t)}><Icon name="x" /> Rechazar</button>
                         </div>
                       )}
                       {t.status === "pending" && t.provider !== "manual" && <span className="faint" style={{ fontSize: 12 }}>Esperando pasarela</span>}
@@ -513,8 +583,24 @@ export function AdminWallet() {
           </div>
         )}
       </div>
-      <ConfirmModal open={confirming !== null} title="Confirmar recarga" busy={busy}
-        text={`Confirma solo si verificaste que recibiste ${confirming ? formatCOP(confirming.amount) : ""} con la referencia ${confirming?.code}. El saldo se acreditará al cliente de inmediato.`}
+      {rejecting && (
+        <RejectProofModal
+          title={`Rechazar recarga ${rejecting.code}`}
+          onClose={() => setRejecting(null)}
+          onReject={async (reason) => {
+            try {
+              await api.post(`/api/admin/wallet/topups/${rejecting.code}/reject`, { reason });
+              toast("success", "Recarga rechazada. El cliente fue notificado.");
+              setRejecting(null);
+              void list.reload();
+            } catch (e) {
+              toast("error", e instanceof ApiError ? e.message : "Error");
+            }
+          }}
+        />
+      )}
+      <ConfirmModal open={confirming !== null} title="Acreditar recarga" busy={busy}
+        text={`Acredita solo si verificaste que recibiste ${confirming ? formatCOP(confirming.amount) : ""}${confirming?.proofReference ? ` con la referencia ${confirming.proofReference}` : ""} en tu cuenta. El saldo se sumará al cliente de inmediato y le llegará una notificación.`}
         confirmLabel="Acreditar saldo" onClose={() => setConfirming(null)}
         onConfirm={async () => {
           setBusy(true);

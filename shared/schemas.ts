@@ -101,6 +101,7 @@ export const addressSchema = z.object({
 export const cartLineSchema = z.object({
   productId: z.number().int().positive(),
   quantity: z.number().int().min(1).max(CART_MAX_QTY),
+  variantId: z.number().int().positive().nullable().optional(),
 });
 export const cartSyncSchema = z.object({
   items: z.array(cartLineSchema).max(50),
@@ -154,9 +155,32 @@ export const categoryInputSchema = z.object({
   color: colorSchema,
   sortOrder: z.number().int().min(0).max(9999).default(0),
   isActive: z.boolean().default(true),
+  /** Imagen propia (reemplaza el ícono en la tienda). */
+  imageUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .refine((v) => v === "" || /^https:\/\/\S+$/.test(v) || /^\/media\/\d+-[a-f0-9]{16}\.(jpg|png|webp|gif)$/.test(v), "Imagen no válida.")
+    .default(""),
 });
 
 export const MAX_PRODUCT_IMAGES = 8;
+export const MAX_PRODUCT_VARIANTS = 20;
+
+/** Opción de un producto (1 mes, 3 meses, perfil, cuenta completa…). */
+export const variantInputSchema = z
+  .object({
+    id: z.number().int().positive().optional(),
+    name: trimmed(1, 80, "El nombre de la opción"),
+    price: z.number({ error: "El precio es obligatorio." }).int().min(100, "El precio mínimo es $100.").max(50_000_000),
+    compareAtPrice: z.number().int().min(0).max(50_000_000).nullable().default(null),
+    stock: z.number().int().min(0, "El inventario no puede ser negativo.").max(1_000_000).default(0),
+    durationDays: z.number().int().min(1, "Mínimo 1 día.").max(3650).nullable().default(null),
+  })
+  .refine((v) => v.compareAtPrice === null || v.compareAtPrice === 0 || v.compareAtPrice > v.price, {
+    path: ["compareAtPrice"],
+    message: "Debe ser mayor que el precio.",
+  });
 export const imageRefSchema = z
   .string()
   .trim()
@@ -190,6 +214,12 @@ export const productInputSchema = z
       .default(""),
     /** Galería: imágenes subidas desde el panel (/media/…) o URLs https. La primera es la principal. */
     images: z.array(imageRefSchema).max(MAX_PRODUCT_IMAGES, `Máximo ${MAX_PRODUCT_IMAGES} imágenes por producto.`).default([]),
+    /** Opciones del producto. Vacío = producto sin variaciones (usa precio e inventario propios). */
+    variants: z
+      .array(variantInputSchema)
+      .max(MAX_PRODUCT_VARIANTS, `Máximo ${MAX_PRODUCT_VARIANTS} opciones.`)
+      .default([])
+      .refine((vs) => new Set(vs.map((v) => v.name.toLowerCase())).size === vs.length, "Hay opciones con el mismo nombre."),
     isFeatured: z.boolean().default(false),
     isActive: z.boolean().default(true),
     deliveryMode: z.enum(["manual", "auto"]).default("manual"),
@@ -324,6 +354,56 @@ export const integrationsSchema = z.object({
 
 /* ---------- Billetera ---------- */
 
+/* ---------- Pagos manuales con comprobante ---------- */
+
+export const MANUAL_ACCOUNT_KINDS = {
+  nequi: "Nequi",
+  daviplata: "Daviplata",
+  breb: "Bre-B (llave)",
+  bancolombia: "Bancolombia",
+  qr: "Código QR",
+  otro: "Otra cuenta",
+} as const;
+export type ManualAccountKind = keyof typeof MANUAL_ACCOUNT_KINDS;
+
+/** Cuenta donde el cliente transfiere (Nequi, llave Bre-B, QR…). Se configura en el panel. */
+export const manualAccountSchema = z
+  .object({
+    id: z.string().regex(/^[a-z0-9]{6,16}$/).optional(),
+    kind: z.enum(Object.keys(MANUAL_ACCOUNT_KINDS) as [ManualAccountKind, ...ManualAccountKind[]]),
+    label: trimmed(2, 60, "El nombre"),
+    holder: z.string().trim().max(80).default(""),
+    number: z.string().trim().max(80).default(""),
+    qrImage: imageRefSchema.or(z.literal("")).default(""),
+    instructions: z.string().trim().max(400).default(""),
+    enabled: z.boolean().default(true),
+  })
+  .refine((a) => a.number || a.qrImage, { path: ["number"], message: "Agrega el número, la llave o una imagen QR." });
+export const manualAccountsSchema = z.object({ accounts: z.array(manualAccountSchema).max(12, "Máximo 12 cuentas.") });
+export type ManualAccount = z.infer<typeof manualAccountSchema> & { id: string };
+
+/** Comprobante privado subido por el cliente. */
+export const privateProofSchema = z.string().regex(/^\/api\/files\/\d+-[a-f0-9]{16}\.(jpg|png|webp|gif)$/, "Sube la imagen del comprobante.");
+
+export const paymentProofSchema = z.object({
+  accountId: z.string({ error: "Elige la cuenta a la que transferiste." }).regex(/^[a-z0-9]{6,16}$/, "Elige la cuenta a la que transferiste."),
+  reference: trimmed(4, 80, "La referencia o número de comprobante"),
+  proofUrl: privateProofSchema,
+});
+
+export const rejectProofSchema = z.object({ reason: trimmed(4, 255, "El motivo") });
+
+/** Logo y nombre que se muestran para cada método de pago. */
+const methodDisplay = z.object({ logo: imageRefSchema.or(z.literal("")).default(""), label: z.string().trim().max(60).default("") });
+export const paymentDisplaySchema = z.object({
+  wallet: methodDisplay.optional(),
+  wompi: methodDisplay.optional(),
+  mercadopago: methodDisplay.optional(),
+  zenobank: methodDisplay.optional(),
+  manual: methodDisplay.optional(),
+});
+export type PaymentDisplay = z.infer<typeof paymentDisplaySchema>;
+
 export const topupSchema = z.object({
   amount: z
     .number({ error: "Ingresa un monto." })
@@ -331,6 +411,10 @@ export const topupSchema = z.object({
     .min(WALLET_MIN_TOPUP, `La recarga mínima es $${WALLET_MIN_TOPUP.toLocaleString("es-CO")}.`)
     .max(WALLET_MAX_TOPUP, `La recarga máxima es $${WALLET_MAX_TOPUP.toLocaleString("es-CO")}.`),
   provider: z.enum(TOPUP_PROVIDERS, { error: "Selecciona un método de pago." }),
+  /** Solo transferencias: cuenta usada, referencia y comprobante. */
+  accountId: z.string().regex(/^[a-z0-9]{6,16}$/).optional(),
+  reference: z.string().trim().max(80).optional(),
+  proofUrl: privateProofSchema.optional(),
 });
 
 export const MANUAL_TOPUP_METHODS = {
@@ -398,6 +482,8 @@ export const resolveTicketSchema = z.object({
 
 export const inventoryBulkSchema = z.object({
   productId: z.number({ error: "Selecciona un producto." }).int().positive("Selecciona un producto."),
+  /** Opción a la que pertenecen las cuentas. null = compartidas entre todas las opciones. */
+  variantId: z.number().int().positive().nullable().default(null),
   lines: trimmed(3, 200_000, "Las cuentas"),
   expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (AAAA-MM-DD).").nullable().default(null),
 });

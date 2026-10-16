@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { HttpError } from "./lib/http.js";
 import { appRoot } from "./lib/paths.js";
 import { rememberOrigin } from "./services/integrations.js";
-import { getMedia, MEDIA_URL_RE } from "./services/media.js";
+import { getMedia, getPrivateMedia, MEDIA_URL_RE, PRIVATE_URL_RE } from "./services/media.js";
 import { ensureCsrf, loadSession, parseCookies, verifyCsrf } from "./middleware/session.js";
 import { accountRouter } from "./routes/account.js";
 import { adminRouter } from "./routes/admin.js";
@@ -61,6 +61,21 @@ export function createApp() {
   );
 
   app.use("/api", express.json({ limit: "200kb" }), parseCookies, loadSession, ensureCsrf, verifyCsrf);
+  // Comprobantes de pago: solo el dueño o un administrador.
+  app.get(/^\/api\/files\//, async (req, res, next) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Inicia sesión para ver este archivo." });
+      const m = PRIVATE_URL_RE.exec(req.path);
+      const media = m ? await getPrivateMedia(Number(m[1]), m[2]!) : null;
+      if (!media || (req.user.role !== "admin" && media.owner_id !== req.user.id)) return res.status(404).json({ error: "Archivo no encontrado." });
+      res.setHeader("content-type", media.mime);
+      res.setHeader("cache-control", "private, max-age=3600");
+      res.setHeader("content-disposition", "inline");
+      res.send(media.data);
+    } catch (err) {
+      next(err);
+    }
+  });
   app.use("/api/auth", authRouter);
   app.use("/api/catalog", catalogRouter);
   app.use("/api/account", accountRouter);

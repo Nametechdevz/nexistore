@@ -17,18 +17,42 @@ export function sniffImage(buf: Buffer): string | null {
 }
 
 export const mediaUrl = (id: number, token: string, mime: string) => `/media/${id}-${token}.${EXT[mime] ?? "bin"}`;
+/** Comprobantes de pago: solo los ve quien los subió y los administradores. */
+export const privateUrl = (id: number, token: string, mime: string) => `/api/files/${id}-${token}.${EXT[mime] ?? "bin"}`;
 export const MEDIA_URL_RE = /^\/media\/(\d+)-([a-f0-9]{16})\.(jpg|png|webp|gif)$/;
+export const PRIVATE_URL_RE = /^\/api\/files\/(\d+)-([a-f0-9]{16})\.(jpg|png|webp|gif)$/;
 
-export async function saveMedia(buf: Buffer, userId: number | null): Promise<{ id: number; url: string }> {
+export async function saveMedia(buf: Buffer, userId: number | null, opts: { private?: boolean } = {}): Promise<{ id: number; url: string }> {
   const mime = sniffImage(buf);
   if (!mime) throw new Error("Formato no admitido. Usa JPG, PNG, WebP o GIF.");
   const token = randomBytes(8).toString("hex");
-  const r = await execute("INSERT INTO media (token, mime, size_bytes, data, created_by) VALUES (?, ?, ?, ?, ?)", [token, mime, buf.length, buf, userId]);
-  return { id: r.insertId, url: mediaUrl(r.insertId, token, mime) };
+  const r = await execute("INSERT INTO media (token, mime, size_bytes, data, created_by, is_private, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+    token, mime, buf.length, buf, userId, opts.private ? 1 : 0, opts.private ? userId : null,
+  ]);
+  return { id: r.insertId, url: (opts.private ? privateUrl : mediaUrl)(r.insertId, token, mime) };
 }
 
 export async function getMedia(id: number, token: string) {
-  return queryOne<{ mime: string; data: Buffer }>("SELECT mime, data FROM media WHERE id = ? AND token = ?", [id, token]);
+  return queryOne<{ mime: string; data: Buffer }>("SELECT mime, data FROM media WHERE id = ? AND token = ? AND is_private = 0", [id, token]);
+}
+
+export async function getPrivateMedia(id: number, token: string) {
+  return queryOne<{ mime: string; data: Buffer; owner_id: number | null }>("SELECT mime, data, owner_id FROM media WHERE id = ? AND token = ? AND is_private = 1", [id, token]);
+}
+
+/** Valida que la URL sea un comprobante privado del usuario y devuelve su id. */
+export async function ownedProofId(url: string, userId: number): Promise<number | null> {
+  const m = PRIVATE_URL_RE.exec(url);
+  if (!m) return null;
+  const row = await queryOne<{ id: number }>("SELECT id FROM media WHERE id = ? AND token = ? AND is_private = 1 AND owner_id = ?", [Number(m[1]), m[2], userId]);
+  return row?.id ?? null;
+}
+
+/** URL privada de un comprobante guardado (para mostrarlo al cliente o al admin). */
+export async function proofUrlFor(id: number | null): Promise<string | null> {
+  if (!id) return null;
+  const r = await queryOne<{ token: string; mime: string }>("SELECT token, mime FROM media WHERE id = ?", [id]);
+  return r ? privateUrl(id, r.token, r.mime) : null;
 }
 
 /**
@@ -40,9 +64,14 @@ export async function cleanupMedia(): Promise<number> {
   if (!old.length) return 0;
   const refs = [
     ...(await query<{ t: string | null }>("SELECT CONCAT_WS(' ', image_url, gallery) AS t FROM products")),
+    ...(await query<{ t: string | null }>("SELECT image_url AS t FROM categories WHERE image_url IS NOT NULL")),
     ...(await query<{ t: string | null }>("SELECT CAST(value AS CHAR) AS t FROM settings")),
   ];
   const used = new Set<number>();
+  // Comprobantes de pago (se referencian por id).
+  for (const r of await query<{ id: number | null }>("SELECT proof_media_id AS id FROM wallet_topups WHERE proof_media_id IS NOT NULL UNION SELECT proof_media_id FROM orders WHERE proof_media_id IS NOT NULL")) {
+    if (r.id) used.add(Number(r.id));
+  }
   for (const { t } of refs) for (const m of (t ?? "").matchAll(/\/media\/(\d+)-/g)) used.add(Number(m[1]));
   const orphan = old.map((o) => o.id).filter((id) => !used.has(id));
   if (orphan.length) await execute(`DELETE FROM media WHERE id IN (${orphan.map(() => "?").join(",")})`, orphan);

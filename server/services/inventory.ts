@@ -19,15 +19,19 @@ export async function syncAutoStock(conn: PoolConnection, productId: number) {
   );
 }
 
-/** Reserva N cuentas disponibles para un ítem de pedido (prefiere las de vencimiento más lejano). */
-export async function reserveItems(conn: PoolConnection, productId: number, orderItemId: number, qty: number, productName: string) {
+/**
+ * Reserva N cuentas disponibles para un ítem de pedido. Con opción, usa primero las cuentas de esa
+ * opción y luego las compartidas (sin opción). Prefiere las de vencimiento más lejano.
+ */
+export async function reserveItems(conn: PoolConnection, productId: number, variantId: number | null, orderItemId: number, qty: number, productName: string) {
   const [rows] = await conn.query<RowDataPacket[]>(
     `SELECT id FROM inventory_items
       WHERE product_id = ? AND status = 'available'
+        ${variantId ? "AND (variant_id = ? OR variant_id IS NULL)" : ""}
         AND (expires_at IS NULL OR expires_at > (UTC_TIMESTAMP() + INTERVAL 1 DAY))
-      ORDER BY (expires_at IS NULL) DESC, expires_at DESC, id
+      ORDER BY (variant_id IS NULL), (expires_at IS NULL) DESC, expires_at DESC, id
       LIMIT ? FOR UPDATE`,
-    [productId, qty],
+    variantId ? [productId, variantId, qty] : [productId, qty],
   );
   if (rows.length < qty) throw conflict(`No hay cuentas disponibles suficientes de ${productName}. Disponibles: ${rows.length}.`);
   const ids = rows.map((r) => r.id as number);
@@ -53,8 +57,9 @@ export async function releaseReserved(conn: PoolConnection, orderId: number) {
  */
 export async function deliverReserved(conn: PoolConnection, orderId: number, customerId: number): Promise<boolean> {
   const [items] = await conn.query<RowDataPacket[]>(
-    `SELECT oi.id, oi.quantity, oi.delivery_content, p.delivery_mode, p.duration_days
-       FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`,
+    `SELECT oi.id, oi.quantity, oi.delivery_content, p.delivery_mode, COALESCE(v.duration_days, p.duration_days) AS duration_days
+       FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id LEFT JOIN product_variants v ON v.id = oi.variant_id
+      WHERE oi.order_id = ?`,
     [orderId],
   );
   let allDelivered = items.length > 0;
@@ -105,7 +110,7 @@ export async function deliveriesFor(orderItemIds: number[], reveal: boolean) {
  */
 export async function replaceItem(conn: PoolConnection, itemId: number, note: string): Promise<{ newId: number; orderCode: string; customerId: number; productName: string }> {
   const [rows] = await conn.query<RowDataPacket[]>(
-    `SELECT i.*, p.name, o.code AS order_code, o.id AS order_id FROM inventory_items i
+    `SELECT i.*, p.name, o.code AS order_code, o.id AS order_id, oi.variant_id AS order_variant_id FROM inventory_items i
        JOIN products p ON p.id = i.product_id
        LEFT JOIN order_items oi ON oi.id = i.order_item_id LEFT JOIN orders o ON o.id = oi.order_id
       WHERE i.id = ? FOR UPDATE`,
@@ -118,9 +123,10 @@ export async function replaceItem(conn: PoolConnection, itemId: number, note: st
   }
   const [cands] = await conn.query<RowDataPacket[]>(
     `SELECT id FROM inventory_items WHERE product_id = ? AND status = 'available'
+       ${old.order_variant_id ? "AND (variant_id = ? OR variant_id IS NULL)" : ""}
        AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP())
-     ORDER BY (expires_at IS NULL) DESC, expires_at DESC, id LIMIT 1 FOR UPDATE`,
-    [old.product_id],
+     ORDER BY (variant_id IS NULL), (expires_at IS NULL) DESC, expires_at DESC, id LIMIT 1 FOR UPDATE`,
+    old.order_variant_id ? [old.product_id, old.order_variant_id] : [old.product_id],
   );
   const next = cands[0];
   if (!next) throw conflict(`No hay cuentas disponibles de ${old.name} para reemplazar. Agrega inventario o reembolsa a la billetera.`);

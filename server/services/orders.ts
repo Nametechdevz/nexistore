@@ -3,14 +3,15 @@ import { query, queryOne, toIso, transaction } from "../db.js";
 import { badRequest, conflict, HttpError, notFound } from "../lib/http.js";
 import { randomToken } from "../lib/security.js";
 import { open, sealIfPossible } from "../lib/vault.js";
-import { getProductsByIds } from "./catalog.js";
+import { getProductsByIds, getVariants, syncProductFromVariants } from "./catalog.js";
 import { deliverReserved, deliveriesFor, releaseReserved, reserveItems } from "./inventory.js";
 import { checkLowStock, notify } from "./notifications.js";
 import { creditTopup, moveWallet } from "./wallet.js";
+import { proofUrlFor } from "./media.js";
 import { canTransition, ORDER_STATUS_LABEL, type OrderStatus } from "../../shared/constants.js";
 import { computeTotals, formatCOP, type CouponRule } from "../../shared/pricing.js";
 import type { CheckoutInput } from "../../shared/schemas.js";
-import type { CartLine, Order } from "../../shared/types.js";
+import type { CartLine, Order, ProductSummary, ProductVariant } from "../../shared/types.js";
 import type { VerifiedPayment } from "../payments/types.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,15 +35,52 @@ export async function findValidCoupon(code: string, subtotal: number, conn?: Poo
 
 /* ---------- Cotización del carrito (precios siempre del servidor) ---------- */
 
+type Resolved = {
+  p: ProductSummary & { isActive: boolean };
+  v: ProductVariant | null;
+  quantity: number;
+  price: number;
+  stock: number;
+};
+
+/**
+ * Resuelve cada línea del carrito con su producto y opción. Si el producto tiene opciones, la línea
+ * debe traer una opción activa; precio e inventario salen de la opción.
+ */
+function resolveLine(
+  l: CartLine,
+  products: Map<number, ProductSummary & { isActive: boolean }>,
+  variants: Map<number, ProductVariant[]>,
+): Resolved | { error: string } {
+  const p = products.get(l.productId);
+  if (!p || !p.isActive) return { error: "Uno de los productos ya no está disponible. Revisa tu carrito." };
+  const vs = variants.get(p.id) ?? [];
+  let v: ProductVariant | null = null;
+  if (vs.length) {
+    v = vs.find((x) => x.id === l.variantId) ?? null;
+    if (!v) return { error: `Elige una opción de ${p.name} en la página del producto.` };
+  }
+  return { p, v, quantity: l.quantity, price: v?.price ?? p.price, stock: v?.stock ?? p.stock };
+}
+
+const displayName = (r: { p: { name: string }; v: { name: string } | null }) => (r.v ? `${r.p.name} (${r.v.name})` : r.p.name);
+
 export async function quoteCart(lines: CartLine[], couponCode?: string) {
   const merged = mergeLines(lines);
-  const products = await getProductsByIds(merged.map((l) => l.productId));
+  const ids = [...new Set(merged.map((l) => l.productId))];
+  const [products, variants] = await Promise.all([getProductsByIds(ids), getVariants(ids)]);
   const items = merged
     .map((l) => {
-      const p = products.get(l.productId);
-      if (!p || !p.isActive) return null;
-      const quantity = Math.min(l.quantity, p.maxPerOrder);
-      return { product: p, quantity, available: p.stock >= quantity, lineTotal: p.price * quantity };
+      const r = resolveLine(l, products, variants);
+      if ("error" in r) return null;
+      const quantity = Math.min(l.quantity, r.p.maxPerOrder);
+      return {
+        product: { ...r.p, price: r.price, compareAtPrice: r.v ? r.v.compareAtPrice : r.p.compareAtPrice, stock: r.stock },
+        variant: r.v ? { id: r.v.id, name: r.v.name } : null,
+        quantity,
+        available: r.stock >= quantity,
+        lineTotal: r.price * quantity,
+      };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
   const base = computeTotals(items.map((i) => ({ unitPrice: i.product.price, quantity: i.quantity })));
@@ -56,19 +94,26 @@ export async function quoteCart(lines: CartLine[], couponCode?: string) {
     }
   }
   const totals = computeTotals(items.map((i) => ({ unitPrice: i.product.price, quantity: i.quantity })), coupon);
+  const kept = new Set(items.map((i) => `${i.product.id}:${i.variant?.id ?? 0}`));
   return {
     items,
-    removed: merged.filter((l) => !items.some((i) => i.product.id === l.productId)).map((l) => l.productId),
+    removed: merged.filter((l) => !kept.has(`${l.productId}:${l.variantId ?? 0}`)).map((l) => l.productId),
+    removedLines: merged.filter((l) => !kept.has(`${l.productId}:${l.variantId ?? 0}`)).map((l) => ({ productId: l.productId, variantId: l.variantId ?? null })),
     coupon: coupon ? { code: coupon.code, kind: coupon.kind, value: coupon.value } : null,
     couponError,
     ...totals,
   };
 }
 
+/** Une líneas repetidas del mismo producto y opción. */
 function mergeLines(lines: CartLine[]): CartLine[] {
-  const map = new Map<number, number>();
-  for (const l of lines) map.set(l.productId, (map.get(l.productId) ?? 0) + l.quantity);
-  return [...map].map(([productId, quantity]) => ({ productId, quantity }));
+  const map = new Map<string, CartLine>();
+  for (const l of lines) {
+    const key = `${l.productId}:${l.variantId ?? 0}`;
+    const prev = map.get(key);
+    map.set(key, { productId: l.productId, variantId: l.variantId ?? null, quantity: (prev?.quantity ?? 0) + l.quantity });
+  }
+  return [...map.values()];
 }
 
 /* ---------- Creación de pedidos ---------- */
@@ -99,19 +144,20 @@ export async function createOrder(
   if (!merged.length) throw badRequest("Tu carrito está vacío.");
 
   const result = await transaction(async (conn) => {
-    const ids = merged.map((l) => l.productId).sort((a, b) => a - b);
+    const ids = [...new Set(merged.map((l) => l.productId))].sort((a, b) => a - b);
     const products = await getProductsByIds(ids, conn, true);
+    const variants = await getVariants(ids, { conn, lock: true });
     const priced = merged.map((l) => {
-      const p = products.get(l.productId);
-      if (!p || !p.isActive) throw conflict("Uno de los productos ya no está disponible. Revisa tu carrito.");
-      if (l.quantity > p.maxPerOrder) throw conflict(`Puedes comprar máximo ${p.maxPerOrder} unidades de ${p.name}.`);
-      if (p.stock < l.quantity) throw conflict(`No hay inventario suficiente de ${p.name}. Disponible: ${Math.max(p.stock, 0)}.`);
-      return { p, quantity: l.quantity };
+      const r = resolveLine(l, products, variants);
+      if ("error" in r) throw conflict(r.error);
+      if (l.quantity > r.p.maxPerOrder) throw conflict(`Puedes comprar máximo ${r.p.maxPerOrder} unidades de ${displayName(r)}.`);
+      if (r.stock < l.quantity) throw conflict(`No hay inventario suficiente de ${displayName(r)}. Disponible: ${Math.max(r.stock, 0)}.`);
+      return r;
     });
 
-    const subtotal = priced.reduce((s, i) => s + i.p.price * i.quantity, 0);
+    const subtotal = priced.reduce((s, i) => s + i.price * i.quantity, 0);
     const coupon = input.couponCode ? await findValidCoupon(input.couponCode, subtotal, conn) : null;
-    const totals = computeTotals(priced.map((i) => ({ unitPrice: i.p.price, quantity: i.quantity })), coupon);
+    const totals = computeTotals(priced.map((i) => ({ unitPrice: i.price, quantity: i.quantity })), coupon);
     if (totals.total <= 0) throw badRequest("El total del pedido debe ser mayor que cero.");
     const foreign = opts.quoteForeign?.(totals.total) ?? null;
 
@@ -125,14 +171,21 @@ export async function createOrder(
         foreign?.currency ?? null, foreign?.amount ?? null],
     );
     const orderId = res.insertId;
-    for (const { p, quantity } of priced) {
+    for (const r of priced) {
+      const { p, v, quantity } = r;
       const [ir] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO order_items (order_id, product_id, product_name, product_summary, art_glyph, art_color, unit_price, quantity)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderId, p.id, p.name, p.summary, p.artGlyph, p.artColor, p.price, quantity],
+        `INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, product_summary, art_glyph, art_color, unit_price, quantity)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, p.id, v?.id ?? null, p.name, v?.name ?? null, p.summary, p.artGlyph, p.artColor, r.price, quantity],
       );
-      if (p.deliveryMode === "auto") await reserveItems(conn, p.id, ir.insertId, quantity, p.name);
-      else await conn.execute("UPDATE products SET stock = stock - ? WHERE id = ?", [quantity, p.id]);
+      if (p.deliveryMode === "auto") {
+        await reserveItems(conn, p.id, v?.id ?? null, ir.insertId, quantity, displayName(r));
+      } else if (v) {
+        await conn.execute("UPDATE product_variants SET stock = stock - ? WHERE id = ?", [quantity, v.id]);
+      } else {
+        await conn.execute("UPDATE products SET stock = stock - ? WHERE id = ?", [quantity, p.id]);
+      }
+      if (v) await syncProductFromVariants(conn, p.id);
     }
     if (coupon) await conn.execute("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?", [coupon.id]);
     await conn.execute("INSERT INTO order_events (order_id, status, note, actor) VALUES (?, 'pending_payment', ?, 'customer')", [
@@ -183,6 +236,7 @@ function mapOrder(r: any, items: any[], deliveries: Map<number, any[]>, opts: { 
       productId: i.product_id,
       productSlug: i.product_slug ?? null,
       productName: i.product_name,
+      variantName: i.variant_name ?? null,
       productSummary: i.product_summary,
       artGlyph: i.art_glyph,
       artColor: i.art_color,
@@ -242,7 +296,16 @@ export async function getOrder(code: string, userId?: number, admin = false): Pr
   const items = (await itemsFor([r.id])).get(r.id) ?? [];
   const deliveries = await deliveriesFor(items.map((i) => i.id), true);
   const events = await query<any>("SELECT * FROM order_events WHERE order_id = ? ORDER BY created_at, id", [r.id]);
-  return mapOrder(r, items, deliveries, { events, admin });
+  const order = mapOrder(r, items, deliveries, { events, admin });
+  if (r.payment_provider === "manual") {
+    order.proof = {
+      url: await proofUrlFor(r.proof_media_id ?? null),
+      reference: r.proof_reference ?? null,
+      account: r.manual_account ?? null,
+      submittedAt: toIso(r.proof_submitted_at),
+    };
+  }
+  return order;
 }
 
 /* ---------- Cambios de estado ---------- */
@@ -251,13 +314,18 @@ async function releaseStock(conn: PoolConnection, orderId: number) {
   const [rows] = await conn.query<RowDataPacket[]>("SELECT stock_released FROM orders WHERE id = ? FOR UPDATE", [orderId]);
   if (rows[0]?.stock_released) return;
   const [items] = await conn.query<RowDataPacket[]>(
-    `SELECT oi.product_id, oi.quantity, p.delivery_mode FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`,
+    `SELECT oi.product_id, oi.variant_id, oi.quantity, p.delivery_mode, v.id AS live_variant
+       FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id LEFT JOIN product_variants v ON v.id = oi.variant_id
+      WHERE oi.order_id = ?`,
     [orderId],
   );
   for (const it of items) {
-    if (it.product_id && it.delivery_mode !== "auto") await conn.execute("UPDATE products SET stock = stock + ? WHERE id = ?", [it.quantity, it.product_id]);
+    if (!it.product_id || it.delivery_mode === "auto") continue;
+    if (it.live_variant) await conn.execute("UPDATE product_variants SET stock = stock + ? WHERE id = ?", [it.quantity, it.live_variant]);
+    else await conn.execute("UPDATE products SET stock = stock + ? WHERE id = ?", [it.quantity, it.product_id]);
   }
   await releaseReserved(conn, orderId);
+  for (const pid of new Set(items.filter((i) => i.variant_id && i.product_id).map((i) => i.product_id as number))) await syncProductFromVariants(conn, pid);
   await conn.execute("UPDATE orders SET stock_released = 1 WHERE id = ?", [orderId]);
 }
 

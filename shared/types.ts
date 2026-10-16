@@ -10,6 +10,7 @@ export interface Category {
   sortOrder: number;
   isActive: boolean;
   productCount?: number;
+  imageUrl?: string | null;
 }
 
 export interface ProductSummary {
@@ -32,6 +33,19 @@ export interface ProductSummary {
   ratingCount: number;
   deliveryMode: "manual" | "auto";
   durationDays: number | null;
+  /** Tiene opciones (1 mes, 3 meses…): el precio mostrado es el más bajo («Desde»). */
+  hasVariants: boolean;
+}
+
+export interface ProductVariant {
+  id: number;
+  name: string;
+  price: number;
+  compareAtPrice: number | null;
+  /** Disponibles: unidades (entrega manual) o cuentas de la opción + compartidas (automática). */
+  stock: number;
+  durationDays: number | null;
+  isActive: boolean;
 }
 
 export interface ProductDetail extends ProductSummary {
@@ -44,6 +58,8 @@ export interface ProductDetail extends ProductSummary {
   accountLabel: string;
   /** Imágenes del producto (la primera es la principal). Vacía = arte generado. */
   images: string[];
+  /** Opciones activas, en orden. Vacía = producto sin variaciones. */
+  variants: ProductVariant[];
   categoryId: number;
   isActive: boolean;
   reviews: { id: number; rating: number; comment: string; author: string; createdAt: string }[];
@@ -52,6 +68,8 @@ export interface ProductDetail extends ProductSummary {
 export interface CartLine {
   productId: number;
   quantity: number;
+  /** Opción elegida (obligatoria si el producto tiene variaciones). */
+  variantId?: number | null;
 }
 
 export interface SessionUser {
@@ -69,6 +87,8 @@ export interface OrderItem {
   productId: number | null;
   productSlug: string | null;
   productName: string;
+  /** Opción comprada (p. ej. «3 meses»). */
+  variantName: string | null;
   productSummary: string;
   artGlyph: string;
   artColor: string | null;
@@ -107,6 +127,19 @@ export interface Order {
   items: OrderItem[];
   events?: OrderEvent[];
   customerId?: number;
+  /** Pago por transferencia: comprobante enviado por el cliente. */
+  proof?: { url: string | null; reference: string | null; account: string | null; submittedAt: string | null } | null;
+}
+
+export interface ManualAccountPublic {
+  id: string;
+  kind: string;
+  kindLabel: string;
+  label: string;
+  holder: string;
+  number: string;
+  qrImage: string | null;
+  instructions: string;
 }
 
 export interface PaymentMethodInfo {
@@ -114,6 +147,8 @@ export interface PaymentMethodInfo {
   label: string;
   description: string;
   configured: boolean;
+  /** Logo subido en el panel (null = ícono por defecto). */
+  logo?: string | null;
   /** Para pagos en moneda extranjera (cripto): moneda y tasa COP por unidad. */
   currency?: string;
   rate?: number | null;

@@ -9,7 +9,7 @@ import { api, ApiError, qs } from "../../lib/api";
 import { formatCOP, formatDate, PROVIDER_LABEL, slugify } from "../../lib/format";
 import { useDebounced, useDocumentTitle, useForm, useQuery } from "../../lib/hooks";
 import { useToast } from "../../lib/state";
-import { categoryInputSchema, MAX_PRODUCT_IMAGES, productInputSchema } from "../../../../shared/schemas";
+import { categoryInputSchema, MAX_PRODUCT_IMAGES, MAX_PRODUCT_VARIANTS, productInputSchema } from "../../../../shared/schemas";
 import { ImageUploader } from "../../components/ImageUploader";
 import type { Category, Order, PaymentMethodInfo, ProductDetail, ProductSummary } from "../../../../shared/types";
 
@@ -126,10 +126,65 @@ export function OrdersTable({ orders }: { orders: Order[] }) {
 
 /* ================= Productos ================= */
 
+type VariantForm = { id?: number; name: string; price: number; compareAtPrice: number | null; stock: number; durationDays: number | null };
+
+/** Editor de opciones (1 mes, 3 meses, perfil, cuenta completa…). */
+function VariantsEditor({ value, onChange, auto, errors }: { value: VariantForm[]; onChange: (v: VariantForm[]) => void; auto: boolean; errors: Record<string, string> }) {
+  const set = (i: number, patch: Partial<VariantForm>) => onChange(value.map((v, j) => (j === i ? { ...v, ...patch } : v)));
+  const move = (i: number, d: number) => {
+    const next = [...value];
+    const [it] = next.splice(i, 1);
+    next.splice(i + d, 0, it!);
+    onChange(next);
+  };
+  const err = (i: number, k: string) => errors[`variants.${i}.${k}`];
+  return (
+    <div className="field">
+      <span className="label">Opciones del producto</span>
+      <p className="hint" style={{ marginTop: -2 }}>
+        Úsalas para vender el mismo producto en varias versiones (por ejemplo 1 mes, 3 meses y 1 año). Cada opción tiene su precio y su inventario; el catálogo muestra «Desde» el precio más bajo.
+        {auto ? " Con entrega automática, el inventario son las cuentas cargadas para esa opción más las cuentas compartidas." : ""}
+      </p>
+      {errors.variants && <p className="field-error">{errors.variants}</p>}
+      <div className="variants-editor">
+        {value.map((v, i) => (
+          <div key={v.id ?? `new-${i}`} className="variant-row">
+            <div className="variant-name">
+              <TextField label="Nombre" value={v.name} error={err(i, "name")} onValue={(val) => set(i, { name: val })} placeholder="Ej.: 3 meses" maxLength={80} />
+            </div>
+            <TextField label="Precio" inputMode="numeric" value={v.price || ""} error={err(i, "price")} onValue={(val) => set(i, { price: num(val) })} />
+            <TextField label="Precio anterior" inputMode="numeric" value={v.compareAtPrice ?? ""} error={err(i, "compareAtPrice")} onValue={(val) => set(i, { compareAtPrice: val === "" ? null : num(val) })} />
+            {auto ? (
+              <TextField label="Inventario" value="Por cuentas" onValue={() => undefined} disabled />
+            ) : (
+              <TextField label="Inventario" inputMode="numeric" value={v.stock} error={err(i, "stock")} onValue={(val) => set(i, { stock: num(val) })} />
+            )}
+            <TextField label="Duración (días)" inputMode="numeric" value={v.durationDays ?? ""} error={err(i, "durationDays")} onValue={(val) => set(i, { durationDays: val === "" ? null : num(val) })} />
+            <div style={{ display: "flex", gap: 4, paddingBottom: 2 }}>
+              <button type="button" className="icon-btn" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Subir ${v.name || "opción"}`}><Icon name="chevron-left" style={{ rotate: "90deg" }} /></button>
+              <button type="button" className="icon-btn" disabled={i === value.length - 1} onClick={() => move(i, 1)} aria-label={`Bajar ${v.name || "opción"}`}><Icon name="chevron-right" style={{ rotate: "90deg" }} /></button>
+              <button type="button" className="icon-btn btn-danger" onClick={() => onChange(value.filter((_, j) => j !== i))} aria-label={`Quitar ${v.name || "opción"}`}><Icon name="trash" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="btn btn-outline btn-sm"
+        style={{ justifySelf: "start" }}
+        disabled={value.length >= MAX_PRODUCT_VARIANTS}
+        onClick={() => onChange([...value, { name: "", price: 0, compareAtPrice: null, stock: 0, durationDays: null }])}
+      >
+        <Icon name="plus" /> Agregar opción
+      </button>
+    </div>
+  );
+}
+
 type ProductForm = {
   name: string; slug: string; categoryId: number; summary: string; description: string; includesText: string; instructions: string;
   deliveryText: string; warrantyText: string; durationLabel: string; accountLabel: string; price: number; compareAtPrice: number | null;
-  stock: number; maxPerOrder: number; artGlyph: string; artColor: string | null; imageUrl: string; images: string[]; isFeatured: boolean; isActive: boolean;
+  stock: number; maxPerOrder: number; artGlyph: string; artColor: string | null; imageUrl: string; images: string[]; variants: VariantForm[]; isFeatured: boolean; isActive: boolean;
   deliveryMode: "manual" | "auto"; durationDays: number | null; lowStockThreshold: number;
 };
 
@@ -137,7 +192,7 @@ const emptyProduct = (categoryId = 0): ProductForm => ({
   name: "", slug: "", categoryId, summary: "", description: "", includesText: "", instructions: "",
   deliveryText: "Entrega digital en tu panel de usuario (Mis pedidos → Ver detalle) una vez confirmado el pago.",
   warrantyText: "Garantía de funcionamiento durante todo el periodo contratado.",
-  durationLabel: "", accountLabel: "", price: 0, compareAtPrice: null, stock: 0, maxPerOrder: 5, artGlyph: "", artColor: null, imageUrl: "", images: [],
+  durationLabel: "", accountLabel: "", price: 0, compareAtPrice: null, stock: 0, maxPerOrder: 5, artGlyph: "", artColor: null, imageUrl: "", images: [], variants: [],
   isFeatured: false, isActive: true, deliveryMode: "manual", durationDays: null, lowStockThreshold: 5,
 });
 
@@ -155,7 +210,9 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
       name: p.name, slug: p.slug, categoryId: p.categoryId, summary: p.summary, description: p.description, includesText: p.includesText,
       instructions: p.instructions, deliveryText: p.deliveryText, warrantyText: p.warrantyText, durationLabel: p.durationLabel, accountLabel: p.accountLabel,
       price: p.price, compareAtPrice: p.compareAtPrice, stock: p.stock, maxPerOrder: p.maxPerOrder, artGlyph: p.artGlyph,
-      artColor: p.rawArtColor, imageUrl: "", images: p.images ?? (p.imageUrl ? [p.imageUrl] : []), isFeatured: p.isFeatured, isActive: p.isActive,
+      artColor: p.rawArtColor, imageUrl: "", images: p.images ?? (p.imageUrl ? [p.imageUrl] : []),
+      variants: (p.variants ?? []).map((x) => ({ id: x.id, name: x.name, price: x.price, compareAtPrice: x.compareAtPrice, stock: x.stock, durationDays: x.durationDays })),
+      isFeatured: p.isFeatured, isActive: p.isActive,
       deliveryMode: p.deliveryMode, durationDays: p.durationDays, lowStockThreshold: (p as unknown as { lowStockThreshold?: number }).lowStockThreshold ?? 5,
     });
     return p;
@@ -194,12 +251,36 @@ function ProductEditor({ id, categories, onClose, onSaved }: { id: number | "new
             <SelectField label="Categoría" value={v.categoryId} error={form.errors.categoryId} onValue={(val) => form.set("categoryId", Number(val))} options={[{ value: 0, label: "Selecciona…" }, ...categories.map((c) => ({ value: c.id, label: c.name }))]} />
             <TextField label="Resumen corto" value={v.summary} error={form.errors.summary} onValue={(val) => form.set("summary", val)} placeholder="1 año · Perfil individual" maxLength={160} />
           </div>
-          <div className="form-row">
-            <TextField label="Precio (COP)" inputMode="numeric" value={v.price || ""} error={form.errors.price} onValue={(val) => form.set("price", num(val))} />
-            <TextField label="Precio anterior (opcional)" inputMode="numeric" value={v.compareAtPrice ?? ""} error={form.errors.compareAtPrice} onValue={(val) => form.set("compareAtPrice", val === "" ? null : num(val))} />
-            <TextField label="Inventario" inputMode="numeric" value={v.stock} error={form.errors.stock} onValue={(val) => form.set("stock", num(val))} disabled={v.deliveryMode === "auto"} hint={v.deliveryMode === "auto" ? "Se calcula con las cuentas disponibles." : undefined} />
-            <TextField label="Máx. por pedido" inputMode="numeric" value={v.maxPerOrder} error={form.errors.maxPerOrder} onValue={(val) => form.set("maxPerOrder", num(val))} />
-          </div>
+          {v.variants.length === 0 ? (
+            <div className="form-row">
+              <TextField label="Precio (COP)" inputMode="numeric" value={v.price || ""} error={form.errors.price} onValue={(val) => form.set("price", num(val))} />
+              <TextField label="Precio anterior (opcional)" inputMode="numeric" value={v.compareAtPrice ?? ""} error={form.errors.compareAtPrice} onValue={(val) => form.set("compareAtPrice", val === "" ? null : num(val))} />
+              <TextField label="Inventario" inputMode="numeric" value={v.stock} error={form.errors.stock} onValue={(val) => form.set("stock", num(val))} disabled={v.deliveryMode === "auto"} hint={v.deliveryMode === "auto" ? "Se calcula con las cuentas disponibles." : undefined} />
+              <TextField label="Máx. por pedido" inputMode="numeric" value={v.maxPerOrder} error={form.errors.maxPerOrder} onValue={(val) => form.set("maxPerOrder", num(val))} />
+            </div>
+          ) : (
+            <div className="form-row">
+              <TextField label="Máx. por pedido (por opción)" inputMode="numeric" value={v.maxPerOrder} error={form.errors.maxPerOrder} onValue={(val) => form.set("maxPerOrder", num(val))} />
+            </div>
+          )}
+          <VariantsEditor
+            value={v.variants}
+            auto={v.deliveryMode === "auto"}
+            errors={form.errors}
+            onChange={(variants) =>
+              // El precio del producto refleja la opción más barata (lo recalcula también el servidor).
+              form.setValues((prev) => {
+                const priced = variants.filter((x) => x.price > 0);
+                const cheapest = priced.length ? priced.reduce((a, b) => (b.price < a.price ? b : a)) : null;
+                return {
+                  ...(prev as ProductForm),
+                  variants,
+                  ...(cheapest ? { price: cheapest.price, compareAtPrice: cheapest.compareAtPrice } : {}),
+                  ...(variants.length && (prev as ProductForm).deliveryMode !== "auto" ? { stock: variants.reduce((n, x) => n + x.stock, 0) } : {}),
+                } as never;
+              })
+            }
+          />
           <div className="form-row">
             <SelectField label="Entrega" value={v.deliveryMode} onValue={(val) => form.set("deliveryMode", val as "auto")} options={[{ value: "manual", label: "Manual (el admin entrega)" }, { value: "auto", label: "Automática desde inventario de cuentas" }]} hint={v.deliveryMode === "auto" ? "Al confirmarse el pago se entrega una cuenta del inventario y el pedido se completa solo." : undefined} />
             <TextField label="Duración del servicio (días)" inputMode="numeric" value={v.durationDays ?? ""} error={form.errors.durationDays} onValue={(val) => form.set("durationDays", val === "" ? null : num(val))} hint="Se usa para avisar al cliente antes del vencimiento." />
@@ -305,7 +386,7 @@ export function AdminProducts() {
                       </div>
                     </td>
                     <td className="muted">{p.categoryName}</td>
-                    <td className="t-right num t-strong">{formatCOP(p.price)}</td>
+                    <td className="t-right num t-strong">{p.hasVariants && <span className="price-from">Desde</span>}{formatCOP(p.price)}</td>
                     <td>
                       {p.deliveryMode === "auto" ? (
                         <Link to={`/admin/inventario?producto=${p.id}`} className={`status ${p.stock <= 3 ? "status-pending_payment" : "status-sold"}`} title="Gestionado por inventario de cuentas">
@@ -372,14 +453,14 @@ export function AdminCategories() {
   const list = useQuery(() => api.get<{ items: Category[] }>("/api/admin/categories"));
   const [editing, setEditing] = useState<Category | "new" | null>(null);
   const [deleting, setDeleting] = useState<Category | null>(null);
-  const form = useForm(categoryInputSchema, { name: "", slug: "", description: "", icon: "tag", color: "#e3122c", sortOrder: 0, isActive: true });
+  const form = useForm(categoryInputSchema, { name: "", slug: "", description: "", icon: "tag", color: "#e3122c", sortOrder: 0, isActive: true, imageUrl: "" });
   const v = form.values;
 
   const open = (c: Category | "new") => {
     setEditing(c);
     form.setErrors({});
     form.setFormError(null);
-    form.setValues(c === "new" ? { name: "", slug: "", description: "", icon: "tag", color: "#e3122c", sortOrder: (list.data?.items.length ?? 0), isActive: true } : { name: c.name, slug: c.slug, description: c.description, icon: c.icon, color: c.color, sortOrder: c.sortOrder, isActive: c.isActive });
+    form.setValues(c === "new" ? { name: "", slug: "", description: "", icon: "tag", color: "#e3122c", sortOrder: (list.data?.items.length ?? 0), isActive: true, imageUrl: "" } : { name: c.name, slug: c.slug, description: c.description, icon: c.icon, color: c.color, sortOrder: c.sortOrder, isActive: c.isActive, imageUrl: c.imageUrl ?? "" });
   };
   const save = form.submit(async (d) => {
     if (editing === "new") await api.post("/api/admin/categories", d);
@@ -403,7 +484,7 @@ export function AdminCategories() {
               <tbody>
                 {list.data?.items.map((c) => (
                   <tr key={c.id}>
-                    <td><div className="cell-product"><span className="cat-icon" style={{ ["--hue" as string]: c.color, width: 36, height: 36 }}><Icon name={c.icon} /></span><strong>{c.name}</strong></div></td>
+                    <td><div className="cell-product"><span className="cat-icon" style={{ ["--hue" as string]: c.color, width: 36, height: 36 }}>{c.imageUrl ? <img src={c.imageUrl} alt="" className="cat-img" /> : <Icon name={c.icon} />}</span><strong>{c.name}</strong></div></td>
                     <td className="muted">{c.slug}</td>
                     <td className="num">{c.productCount}</td>
                     <td className="num">{c.sortOrder}</td>
@@ -440,6 +521,7 @@ export function AdminCategories() {
             </div>
             <TextField label="Orden" inputMode="numeric" value={v.sortOrder ?? 0} onValue={(val) => form.set("sortOrder", num(val))} />
           </div>
+          <ImageUploader label="Imagen (opcional)" max={1} maxSide={800} value={v.imageUrl ? [v.imageUrl] : []} onChange={(u) => form.set("imageUrl", u[0] ?? "")} hint="Cuadrada, ideal 400 × 400 px. Si la subes, se muestra en lugar del ícono." />
           <Check checked={Boolean(v.isActive)} onChange={(val) => form.set("isActive", val)}>Categoría activa</Check>
         </form>
       </Modal>

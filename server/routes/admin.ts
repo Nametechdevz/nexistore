@@ -1,13 +1,15 @@
 import express, { Router, type Response } from "express";
 import { z } from "zod";
-import { execute, query, queryOne, toBool, toIso } from "../db.js";
+import { execute, query, queryOne, toBool, toIso, transaction } from "../db.js";
 import { ah, badRequest, conflict, HttpError, intParam, likeEscape, notFound, pageParams, parse } from "../lib/http.js";
 import { requireAdmin } from "../middleware/session.js";
-import { getProductBySlug, listCategories, listProducts } from "../services/catalog.js";
+import { getProductBySlug, listCategories, listProducts, syncProductFromVariants } from "../services/catalog.js";
 import { changeStatus, getOrder, listOrders, setDelivery } from "../services/orders.js";
 import { DEFAULT_CAMPAIGN, DEFAULT_CRYPTO, DEFAULT_STORE, getSetting, setSetting } from "../services/settings.js";
 import { detectedUrl, publicUrl, publicView, saveIntegrations } from "../services/integrations.js";
 import { testMail } from "../services/mailer.js";
+import { getManualAccounts, getPaymentDisplay, saveManualAccounts } from "../services/manual-pay.js";
+import { notify } from "../services/notifications.js";
 import { MAX_MEDIA_BYTES, saveMedia, sniffImage } from "../services/media.js";
 import { paymentMethods } from "../payments/index.js";
 import { ORDER_STATUSES } from "../../shared/constants.js";
@@ -15,6 +17,9 @@ import {
   campaignSchema,
   cryptoSettingsSchema,
   integrationsSchema,
+  manualAccountsSchema,
+  paymentDisplaySchema,
+  rejectProofSchema,
   categoryInputSchema,
   couponInputSchema,
   orderDeliverySchema,
@@ -157,6 +162,42 @@ async function assertCategory(id: number) {
   }
 }
 
+/**
+ * Guarda las opciones del producto: actualiza las existentes, crea las nuevas y quita las que ya no
+ * vienen (si alguna tiene pedidos o cuentas asociadas se desactiva en vez de borrarse).
+ */
+async function saveVariants(productId: number, variants: z.infer<typeof productInputSchema>["variants"]) {
+  await transaction(async (conn) => {
+    const [rows] = (await conn.query("SELECT id FROM product_variants WHERE product_id = ? FOR UPDATE", [productId])) as unknown as [{ id: number }[]];
+    const existing = new Set(rows.map((r) => r.id));
+    const keep = new Set<number>();
+    for (const [i, v] of variants.entries()) {
+      if (v.id && existing.has(v.id)) {
+        await conn.execute(
+          "UPDATE product_variants SET name = ?, price = ?, compare_at_price = ?, stock = ?, duration_days = ?, sort_order = ?, is_active = 1 WHERE id = ?",
+          [v.name, v.price, v.compareAtPrice || null, v.stock, v.durationDays, i, v.id],
+        );
+        keep.add(v.id);
+      } else {
+        await conn.execute(
+          "INSERT INTO product_variants (product_id, name, price, compare_at_price, stock, duration_days, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [productId, v.name, v.price, v.compareAtPrice || null, v.stock, v.durationDays, i],
+        );
+      }
+    }
+    for (const id of existing) {
+      if (keep.has(id)) continue;
+      const [[used]] = (await conn.query(
+        "SELECT (SELECT COUNT(*) FROM order_items WHERE variant_id = ?) + (SELECT COUNT(*) FROM inventory_items WHERE variant_id = ?) AS n",
+        [id, id],
+      )) as unknown as [[{ n: number }]];
+      if (Number(used.n) > 0) await conn.execute("UPDATE product_variants SET is_active = 0 WHERE id = ?", [id]);
+      else await conn.execute("DELETE FROM product_variants WHERE id = ?", [id]);
+    }
+    await syncProductFromVariants(conn, productId);
+  });
+}
+
 adminRouter.post(
   "/products",
   ah(async (req, res) => {
@@ -169,6 +210,7 @@ adminRouter.post(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       productParams(d),
     ).catch((e) => dup(e, "slug", "Ya existe un producto con ese slug."));
+    await saveVariants(r.insertId, d.variants);
     res.status(201).json({ id: r.insertId });
   }),
 );
@@ -188,6 +230,7 @@ adminRouter.put(
       [...productParams(d), id],
     ).catch((e) => dup(e, "slug", "Ya existe un producto con ese slug."));
     if (!r.affectedRows) throw notFound("Producto no encontrado.");
+    await saveVariants(id, d.variants);
     // Con entrega automática, el inventario es el número de cuentas disponibles.
     if (d.deliveryMode === "auto") {
       await execute(
@@ -206,6 +249,9 @@ adminRouter.patch(
     const { delta } = parse(z.object({ delta: z.number().int().min(-100000).max(100000) }), req.body);
     const mode = await queryOne<{ delivery_mode: string }>("SELECT delivery_mode FROM products WHERE id = ?", [id]);
     if (mode?.delivery_mode === "auto") throw conflict("Este producto usa inventario de cuentas: agrega o retira cuentas en Inventario.");
+    if (await queryOne("SELECT id FROM product_variants WHERE product_id = ? AND is_active = 1 LIMIT 1", [id])) {
+      throw conflict("Este producto tiene opciones: ajusta el inventario de cada opción al editar el producto.");
+    }
     const r = await execute("UPDATE products SET stock = GREATEST(stock + ?, 0) WHERE id = ?", [delta, id]);
     if (!r.affectedRows) throw notFound("Producto no encontrado.");
     const row = await queryOne<{ stock: number }>("SELECT stock FROM products WHERE id = ?", [id]);
@@ -249,8 +295,8 @@ adminRouter.post(
   ah(async (req, res) => {
     const d = parse(categoryInputSchema, req.body);
     const r = await execute(
-      "INSERT INTO categories (name, slug, description, icon, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [d.name, d.slug, d.description, d.icon, d.color, d.sortOrder, d.isActive ? 1 : 0],
+      "INSERT INTO categories (name, slug, description, icon, color, sort_order, is_active, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [d.name, d.slug, d.description, d.icon, d.color, d.sortOrder, d.isActive ? 1 : 0, d.imageUrl || null],
     ).catch((e) => dup(e, "slug", "Ya existe una categoría con ese slug."));
     res.status(201).json({ id: r.insertId });
   }),
@@ -261,8 +307,8 @@ adminRouter.put(
   ah(async (req, res) => {
     const d = parse(categoryInputSchema, req.body);
     const r = await execute(
-      "UPDATE categories SET name = ?, slug = ?, description = ?, icon = ?, color = ?, sort_order = ?, is_active = ? WHERE id = ?",
-      [d.name, d.slug, d.description, d.icon, d.color, d.sortOrder, d.isActive ? 1 : 0, intParam(req.params.id)],
+      "UPDATE categories SET name = ?, slug = ?, description = ?, icon = ?, color = ?, sort_order = ?, is_active = ?, image_url = ? WHERE id = ?",
+      [d.name, d.slug, d.description, d.icon, d.color, d.sortOrder, d.isActive ? 1 : 0, d.imageUrl || null, intParam(req.params.id)],
     ).catch((e) => dup(e, "slug", "Ya existe una categoría con ese slug."));
     if (!r.affectedRows) throw notFound("Categoría no encontrada.");
     res.json({ ok: true });
@@ -306,6 +352,32 @@ adminRouter.get(
       customer,
       payments: payments.map((p) => ({ provider: p.provider, externalId: p.external_id, status: p.status, amount: p.amount, createdAt: toIso(p.created_at) })),
     });
+  }),
+);
+
+/** Rechaza el comprobante de un pedido por transferencia: el cliente puede enviar otro. */
+adminRouter.post(
+  "/orders/:code/reject-proof",
+  ah(async (req, res) => {
+    const { reason } = parse(rejectProofSchema, req.body);
+    const o = await queryOne<{ id: number; user_id: number; status: string; proof_media_id: number | null }>(
+      "SELECT id, user_id, status, proof_media_id FROM orders WHERE code = ?",
+      [String(req.params.code)],
+    );
+    if (!o) throw notFound("Pedido no encontrado.");
+    if (o.status !== "pending_payment" || !o.proof_media_id) throw conflict("El pedido no tiene un comprobante pendiente de revisión.");
+    await execute("UPDATE orders SET proof_media_id = NULL, proof_reference = NULL, manual_account = NULL, proof_submitted_at = NULL WHERE id = ?", [o.id]);
+    await execute("INSERT INTO order_events (order_id, status, note, actor) VALUES (?, 'pending_payment', ?, 'admin')", [o.id, `Comprobante rechazado: ${reason}`]);
+    await notify({
+      audience: "user",
+      userId: o.user_id,
+      kind: "payment_rejected",
+      title: `Revisamos tu comprobante del pedido ${String(req.params.code)}`,
+      body: `No pudimos validarlo: ${reason}. Puedes enviar uno nuevo desde tu pedido.`,
+      link: `/cuenta/pedidos/${String(req.params.code)}`,
+      email: true,
+    });
+    res.json({ order: await getOrder(String(req.params.code), undefined, true) });
   }),
 );
 
@@ -522,7 +594,27 @@ adminRouter.get(
       store: await getSetting("store", DEFAULT_STORE),
       crypto: await getSetting("crypto", DEFAULT_CRYPTO),
       paymentMethods: await paymentMethods(),
+      manualAccounts: await getManualAccounts(true),
+      paymentDisplay: await getPaymentDisplay(),
     });
+  }),
+);
+
+/** Cuentas para pagos por transferencia con comprobante (Nequi, Bre-B, QR…). */
+adminRouter.put(
+  "/settings/manual-accounts",
+  ah(async (req, res) => {
+    const d = parse(manualAccountsSchema, req.body);
+    res.json({ accounts: await saveManualAccounts(d.accounts) });
+  }),
+);
+
+/** Logo y nombre visibles de cada método de pago. */
+adminRouter.put(
+  "/settings/payment-display",
+  ah(async (req, res) => {
+    await setSetting("paymentDisplay", parse(paymentDisplaySchema, req.body));
+    res.json({ paymentMethods: await paymentMethods() });
   }),
 );
 

@@ -5,6 +5,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
+import { configureTransfers, sendProof } from "./common.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@nexistore.local";
@@ -35,6 +36,21 @@ async function shot(page, name, full = false) {
 
 const desktop = { viewport: { width: 1366, height: 800 } };
 const mobile = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 };
+
+/* ---------- 0. Admin: cuenta para transferencias ---------- */
+{
+  const sctx = await browser.newContext(desktop);
+  const sp = await sctx.newPage();
+  watch(sp, "admin-config");
+  await sp.goto(`${BASE}/ingresar?next=/admin`);
+  await sp.getByLabel("Correo electrónico").fill(ADMIN_EMAIL);
+  await sp.getByLabel("Contraseña", { exact: true }).fill(ADMIN_PASSWORD);
+  await sp.getByRole("button", { name: "Iniciar sesión" }).click();
+  await sp.waitForURL(/\/admin$/);
+  await configureTransfers(sp, BASE);
+  await sctx.close();
+  step("Admin configura una cuenta Nequi para transferencias desde el panel");
+}
 
 /* ---------- 1. Tienda pública (escritorio) ---------- */
 const ctx = await browser.newContext(desktop);
@@ -116,8 +132,13 @@ await page.getByRole("button", { name: /Pagar/ }).click();
 await page.waitForURL(/\/pedido\/NS-.+\/confirmacion/);
 await page.getByRole("heading", { name: "Pedido recibido" }).waitFor();
 const orderCode = page.url().match(/pedido\/(NS-[^/]+)/)[1];
+await page.locator(".mp-account").first().waitFor();
 await shot(page, "04d-confirmacion");
 step(`Pedido ${orderCode} creado (pendiente de pago, sin simular pago)`);
+await sendProof(page, "M98765432", "Enviar comprobante");
+await page.getByText("Comprobante en revisión").waitFor();
+await shot(page, "04e-comprobante-enviado");
+step("El cliente envía el comprobante de la transferencia");
 
 await page.goto(`${BASE}/cuenta/pedidos`);
 await page.locator(".order-card").first().waitFor();
@@ -149,7 +170,9 @@ await admin.keyboard.press("Escape");
 step("Admin: dashboard, productos y validación del formulario");
 
 await admin.goto(`${BASE}/admin/pedidos/${orderCode}`);
-await admin.getByRole("button", { name: "Confirmar pago recibido" }).click();
+await admin.locator(".proof-review img").waitFor();
+await shot(admin, "08e-admin-comprobante");
+await admin.locator(".proof-panel").getByRole("button", { name: "Confirmar pago" }).click();
 await admin.locator(".modal").getByRole("button", { name: "Confirmar" }).click();
 await admin.getByRole("button", { name: "Entregar y completar" }).waitFor();
 const boxes = admin.locator("textarea[aria-label^='Entrega de']");
